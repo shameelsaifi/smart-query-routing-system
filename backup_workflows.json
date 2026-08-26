@@ -1,0 +1,163 @@
+[
+  {
+    "name": "My workflow",
+    "nodes": [
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "http://127.0.0.1:8000/api/v1/email-intake/simulate",
+          "sendBody": true,
+          "bodyParameters": {
+            "parameters": [
+              {
+                "name": "sender_email",
+                "value": "={{ $json.From.match(/<([^>]+)>/)?.[1] || $json.From }}"
+              },
+              {
+                "name": "subject",
+                "value": "={{ $json.Subject }}"
+              },
+              {
+                "name": "message",
+                "value": "={{ $json.snippet }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.5,
+        "position": [
+          224,
+          0
+        ],
+        "id": "b85ea35d-12b0-4b89-b22e-197241421911",
+        "name": "HTTP Request"
+      },
+      {
+        "parameters": {
+          "pollTimes": {
+            "item": [
+              {
+                "mode": "everyMinute"
+              }
+            ]
+          },
+          "filters": {
+            "readStatus": "both"
+          }
+        },
+        "type": "n8n-nodes-base.gmailTrigger",
+        "typeVersion": 1.4,
+        "position": [
+          -16,
+          -208
+        ],
+        "id": "78d64687-3893-436d-bf01-3beb88d03497",
+        "name": "Gmail Trigger - Fee Billing",
+        "credentials": {
+          "gmailOAuth2": {
+            "id": "qfeSX16wzGu8DkEi",
+            "name": "Gmail account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "pollTimes": {
+            "item": [
+              {
+                "mode": "everyMinute"
+              }
+            ]
+          },
+          "filters": {
+            "readStatus": "both"
+          }
+        },
+        "type": "n8n-nodes-base.gmailTrigger",
+        "typeVersion": 1.4,
+        "position": [
+          -16,
+          0
+        ],
+        "id": "49f1ce67-6284-4f21-8229-327ba452d6d7",
+        "name": "Gmail Trigger - Scholarship",
+        "credentials": {
+          "gmailOAuth2": {
+            "id": "gWZFqiuoSAtSJg7t",
+            "name": "Scholarship Officer"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "pollTimes": {
+            "item": [
+              {
+                "mode": "everyMinute"
+              }
+            ]
+          },
+          "filters": {
+            "readStatus": "both"
+          }
+        },
+        "type": "n8n-nodes-base.gmailTrigger",
+        "typeVersion": 1.4,
+        "position": [
+          -16,
+          192
+        ],
+        "id": "d03d135f-940c-4a03-b07e-f00e4314fead",
+        "name": "Gmail Trigger - Refunds",
+        "credentials": {
+          "gmailOAuth2": {
+            "id": "tYc49NT1OayIMz0B",
+            "name": "Refunds Officer"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "HTTP Request": {
+        "main": [
+          []
+        ]
+      },
+      "Gmail Trigger - Fee Billing": {
+        "main": [
+          [
+            {
+              "node": "HTTP Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Gmail Trigger - Scholarship": {
+        "main": [
+          [
+            {
+              "node": "HTTP Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Gmail Trigger - Refunds": {
+        "main": [
+          [
+            {
+              "node": "HTTP Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    }
+  }
+]
