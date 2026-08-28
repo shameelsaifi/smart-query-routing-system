@@ -10,6 +10,7 @@ import { supabase } from './lib/supabase'
 
 import AccessDenied from './pages/AccessDenied'
 import FeeBillingDashboard from './pages/FeeBillingDashboard'
+import HodDashboard from './pages/HodDashboard'
 import LoginPage from './pages/LoginPage'
 import RefundsDashboard from './pages/RefundsDashboard'
 import ScholarshipDashboard from './pages/ScholarshipDashboard'
@@ -20,6 +21,10 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
 function getDashboardPath(profile) {
   if (profile.role === 'STUDENT') {
     return '/student'
+  }
+
+  if (profile.role === 'HOD') {
+    return '/hod'
   }
 
   if (profile.role === 'DEPARTMENT_STAFF') {
@@ -248,80 +253,98 @@ function AppContent() {
       />
 
       <Route
-        path="/accounts/fee-billing"
+        path="/hod"
         element={
-          profile.role === 'DEPARTMENT_STAFF' &&
-          profile.desk_code === 'FEE_BILLING' ? (
-            <FeeBillingDashboard
+          profile.role === 'HOD' ? (
+            <HodDashboard
               profile={profile}
               accessToken={sessionAccessToken}
               onLogout={handleLogout}
-            />
-          ) : (
-            <AccessDenied
-              message="Fee & Billing Desk access denied."
-              onLogout={handleLogout}
-            />
-          )
-        }
-      />
-
-      <Route
-        path="/accounts/scholarship"
-        element={
-          profile.role === 'DEPARTMENT_STAFF' &&
-          profile.desk_code === 'SCHOLARSHIP' ? (
-            <ScholarshipDashboard
-              profile={profile}
-              accessToken={sessionAccessToken}
-              onLogout={handleLogout}
-            />
-          ) : (
-            <AccessDenied
-              message="Scholarship Desk access denied."
-              onLogout={handleLogout}
-            />
-          )
-        }
-      />
-
-      <Route
-        path="/accounts/refunds"
-        element={
-          profile.role === 'DEPARTMENT_STAFF' &&
-          profile.desk_code === 'REFUNDS' ? (
-            <RefundsDashboard
-              profile={profile}
-              accessToken={sessionAccessToken}
-              onLogout={handleLogout}
-            />
-          ) : (
-            <AccessDenied
-              message="Refunds Desk access denied."
-              onLogout={handleLogout}
-            />
-          )
-        }
-      />
-
-      <Route
-        path="*"
-        element={
+          />
+        ) : (
           <AccessDenied
-            message="This page does not exist or you are not authorized to access it."
+            message="HOD access required."
             onLogout={handleLogout}
           />
-        }
-      />
-    </Routes>
+        )
+      }
+    />
+
+    <Route
+      path="/accounts/fee-billing"
+      element={
+        profile.role === 'DEPARTMENT_STAFF' &&
+        profile.desk_code === 'FEE_BILLING' ? (
+          <FeeBillingDashboard
+            profile={profile}
+            accessToken={sessionAccessToken}
+            onLogout={handleLogout}
+          />
+        ) : (
+          <AccessDenied
+            message="Fee & Billing Desk access denied."
+            onLogout={handleLogout}
+          />
+        )
+      }
+    />
+
+    <Route
+      path="/accounts/scholarship"
+      element={
+        profile.role === 'DEPARTMENT_STAFF' &&
+        profile.desk_code === 'SCHOLARSHIP' ? (
+          <ScholarshipDashboard
+            profile={profile}
+            accessToken={sessionAccessToken}
+            onLogout={handleLogout}
+          />
+        ) : (
+          <AccessDenied
+            message="Scholarship Desk access denied."
+            onLogout={handleLogout}
+          />
+        )
+      }
+    />
+
+    <Route
+      path="/accounts/refunds"
+      element={
+        profile.role === 'DEPARTMENT_STAFF' &&
+        profile.desk_code === 'REFUNDS' ? (
+          <RefundsDashboard
+            profile={profile}
+            accessToken={sessionAccessToken}
+            onLogout={handleLogout}
+          />
+        ) : (
+          <AccessDenied
+            message="Refunds Desk access denied."
+            onLogout={handleLogout}
+          />
+        )
+      }
+    />
+
+    <Route
+      path="*"
+      element={
+        <AccessDenied
+          message="This page does not exist or you are not authorized to access it."
+          onLogout={handleLogout}
+        />
+      }
+    />
+  </Routes>
   )
 }
 
 function App() {
   return (
-    <BrowserRouter>
-      <AppContent />
-    </BrowserRouter>
+  <BrowserRouter>
+    <AppContent />
+  </BrowserRouter>
   )
 }
 

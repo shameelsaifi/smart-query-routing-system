@@ -35,6 +35,7 @@ async def get_current_application_user(
                     u.role,
                     u.is_active,
                     u.is_available,
+                    u.department_id::text AS department_id,
                     d.department_name,
                     ad.desk_code,
                     ad.desk_name

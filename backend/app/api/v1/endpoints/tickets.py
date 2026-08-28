@@ -14,6 +14,8 @@ from app.services.ticket_service import (
 from app.services.ticket_workflow_service import (
     resolve_ticket,
     start_ticket,
+    get_hod_dashboard_stats,
+    approve_or_reassign_ticket,
 )
 
 
@@ -88,3 +90,29 @@ async def resolve_assigned_ticket(
         ticket_number=ticket_number,
         current_user=current_user,
     )
+
+@router.get(
+    "/hod/dashboard",
+    summary="Get comprehensive HOD dashboard stats and queues",
+)
+async def get_hod_dashboard(
+    current_user: dict[str, Any] = Depends(require_role("HOD"))
+) -> dict[str, Any]:
+    return get_hod_dashboard_stats(current_user)
+
+@router.patch(
+    "/{ticket_number}/hod-action",
+    summary="HOD actions: Approve, Reject, or Reassign",
+)
+async def perform_hod_action(
+    ticket_number: str,
+    action: str, 
+    new_officer_id: str = None,
+    current_user: dict[str, Any] = Depends(require_role("HOD"))
+) -> dict[str, Any]:
+    return approve_or_reassign_ticket(
+        ticket_number=ticket_number, 
+        action=action.upper(), 
+        new_officer_id=new_officer_id, 
+        current_user=current_user
+    )    
