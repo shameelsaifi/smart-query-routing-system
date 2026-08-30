@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
 
@@ -18,11 +18,43 @@ function StudentDashboard({ profile, accessToken, onLogout }) {
   const [errorMessage, setErrorMessage] = useState('')
   const [validationError, setValidationError] = useState(false)
 
-  // Ticket History
-  const [recentTickets, setRecentTickets] = useState([
-    { id: 'TK-8942', subject: 'LMS Grade Book Inquiry', status: 'In Progress', date: '2026-08-27' },
-    { id: 'TK-8109', subject: 'Fee Voucher Installment Request', status: 'Resolved', date: '2026-08-20' },
-  ])
+  // Ticket History State (FIXED: Started as empty array)
+  const [recentTickets, setRecentTickets] = useState([])
+  const [loadingTickets, setLoadingTickets] = useState(false)
+
+  // Fetch logged-in user's actual tickets from backend
+  useEffect(() => {
+    const fetchUserTickets = async () => {
+      if (!accessToken) return
+      
+      setLoadingTickets(true)
+      try {
+        const response = await fetch(`${API_BASE_URL}/tickets`, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        })
+        
+        if (response.ok) {
+          const data = await response.json()
+          // Map backend response fields to UI format if needed
+          const formatted = data.map((t) => ({
+            id: t.ticket_number || t.id,
+            subject: t.subject,
+            status: t.status || 'Pending',
+            date: t.created_at ? t.created_at.split('T')[0] : new Date().toISOString().split('T')[0],
+          }))
+          setRecentTickets(formatted)
+        }
+      } catch (err) {
+        console.error("Error fetching tickets:", err)
+      } finally {
+        setLoadingTickets(false)
+      }
+    }
+
+    fetchUserTickets()
+  }, [accessToken])
 
   const maxSubjectLen = 150
   const maxMessageLen = 3000
@@ -155,7 +187,6 @@ function StudentDashboard({ profile, accessToken, onLogout }) {
         {/* Search Bar & User Controls */}
         <div className="flex items-center gap-4">
           
-          {/* Adjusted Search Ticket Input */}
           <div className="relative hidden sm:block w-48 lg:w-64">
             <svg
               className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
@@ -180,7 +211,7 @@ function StudentDashboard({ profile, accessToken, onLogout }) {
           <div className="flex items-center gap-5">
             <div className="text-right hidden sm:flex flex-col items-end gap-2">
               <div className="text-xs font-semibold text-slate-200 leading-none">
-                {profile?.full_name || 'Demo Student 2'}
+                {profile?.full_name || 'Student'}
               </div>
               <span className="inline-block px-5 py-0.5 text-[10px] font-bold tracking-wider text-blue-400 bg-blue-950/80 rounded border border-blue-800 uppercase leading-tight">
                 {profile?.role || 'STUDENT'}
@@ -222,7 +253,6 @@ function StudentDashboard({ profile, accessToken, onLogout }) {
         {activeTab === 'new_query' ? (
           <div className="w-full max-w-2xl bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden my-auto">
             
-            {/* Left Aligned Larger Header */}
             <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-left">
               <div>
                 <h1 className="text-xl sm:text-3xl font-bold text-slate-900 tracking-tight">Submit a New Query</h1>
@@ -279,7 +309,6 @@ function StudentDashboard({ profile, accessToken, onLogout }) {
 
               <form onSubmit={handleSubmit} className="space-y-4">
                 
-                {/* Pre-filled Account Information */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
@@ -287,7 +316,7 @@ function StudentDashboard({ profile, accessToken, onLogout }) {
                     </label>
                     <input
                       type="text"
-                      value={profile?.full_name || 'Demo Student 2'}
+                      value={profile?.full_name || 'Student'}
                       disabled
                       className="w-full px-3.5 py-2.5 text-xs text-slate-500 bg-slate-100 border border-slate-200 rounded-xl cursor-not-allowed font-medium select-none focus:outline-none"
                     />
@@ -299,14 +328,13 @@ function StudentDashboard({ profile, accessToken, onLogout }) {
                     </label>
                     <input
                       type="email"
-                      value={profile?.email || 'bc230209628zar@vu.edu.pk'}
+                      value={profile?.email || ''}
                       disabled
                       className="w-full px-3.5 py-2.5 text-xs text-slate-500 bg-slate-100 border border-slate-200 rounded-xl cursor-not-allowed font-medium select-none focus:outline-none"
                     />
                   </div>
                 </div>
 
-                {/* Subject Field */}
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
                     <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
@@ -329,7 +357,6 @@ function StudentDashboard({ profile, accessToken, onLogout }) {
                   />
                 </div>
 
-                {/* Message Details */}
                 <div>
                   <div className="flex justify-between items-center mb-1.5">
                     <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
@@ -352,7 +379,6 @@ function StudentDashboard({ profile, accessToken, onLogout }) {
                   />
                 </div>
 
-                {/* Optional Attachment Bar */}
                 <div>
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
                     Attachment 
@@ -369,7 +395,6 @@ function StudentDashboard({ profile, accessToken, onLogout }) {
                   </div>
                 </div>
 
-                {/* Submit Actions */}
                 <div className="pt-2 flex items-center justify-between border-t border-slate-100">
                   <button
                     type="button"
@@ -419,7 +444,9 @@ function StudentDashboard({ profile, accessToken, onLogout }) {
             </div>
 
             <div className="p-6">
-              {filteredTickets.length === 0 ? (
+              {loadingTickets ? (
+                <div className="text-center py-8 text-slate-400 text-xs font-medium">Loading tickets...</div>
+              ) : filteredTickets.length === 0 ? (
                 <div className="text-center py-8 text-slate-400 text-xs font-medium">No matching tickets found.</div>
               ) : (
                 <div className="space-y-3">
