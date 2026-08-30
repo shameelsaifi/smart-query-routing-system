@@ -48,6 +48,44 @@ async def submit_ticket(
     return TicketCreateResponse(**ticket)
 
 
+@router.post(
+    "/email-ingest",
+    status_code=status.HTTP_201_CREATED,
+    summary="Ingest email query from n8n workflow (Public Endpoint)",
+)
+async def ingest_email_ticket(
+    payload: dict[str, Any],
+    background_tasks: BackgroundTasks,
+) -> dict[str, Any]:
+    # Construct mock student profile for incoming emails
+    student_email = payload.get("student_email", "student@example.com")
+    
+    system_user = {
+        "user_id": "00000000-0000-0000-0000-000000000000",
+        "email": student_email,
+        "role": "STUDENT",
+    }
+
+    ticket_input = TicketCreate(
+        subject=payload.get("subject", "No Subject"),
+        description=payload.get("description", ""),
+        category=payload.get("category", "GENERAL_QUERY"),
+        confidence=float(payload.get("confidence", 0.9)),
+    )
+
+    ticket = create_ticket(
+        current_user=system_user,
+        ticket_data=ticket_input,
+    )
+
+    background_tasks.add_task(
+        process_ticket_pipeline,
+        ticket["ticket_number"],
+    )
+
+    return ticket
+
+
 @router.get(
     "/assigned-to-me",
     summary="Get tickets assigned to current officer",
@@ -115,4 +153,4 @@ async def perform_hod_action(
         action=action.upper(), 
         new_officer_id=new_officer_id, 
         current_user=current_user
-    )    
+    )
