@@ -196,9 +196,12 @@ def resolve_ticket(
         db.close()
 
 
-def get_hod_dashboard_stats(current_user: dict[str, Any]) -> dict[str, Any]:
+def get_hod_dashboard_stats(
+    current_user: dict[str, Any]
+) -> dict[str, Any]:
+
     department_id = current_user.get("department_id")
-    
+
     if not department_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -206,98 +209,364 @@ def get_hod_dashboard_stats(current_user: dict[str, Any]) -> dict[str, Any]:
         )
 
     db = SessionLocal()
+
     try:
-        # 1. High-Level Metrics & Escalated Tickets (Fixed ambiguous columns by adding t.)
+        # =========================================================
+        # 1. HIGH-LEVEL METRICS
+        # =========================================================
         stats = db.execute(
-            text("""
-            SELECT 
-                COUNT(*) as total_queries,
-                COUNT(*) FILTER (WHERE t.status IN ('PENDING', 'IN_PROGRESS', 'ROUTED')) as active_queries,
-                COUNT(*) FILTER (WHERE t.status = 'ESCALATED' OR t.created_at < NOW() - INTERVAL '48 hours') as escalated_queries,
-                COALESCE(ROUND(AVG(EXTRACT(EPOCH FROM (t.updated_at - t.created_at))/3600)::numeric, 1), 0) as avg_resolution_hours
-            FROM public.tickets t
-            LEFT JOIN public.users u ON t.assigned_officer_id = u.user_id
-            WHERE u.department_id = CAST(:department_id AS UUID)
-            """),
-            {"department_id": department_id}
+            text(
+                """
+                SELECT
+                    COUNT(*) AS total_queries,
+
+                    COUNT(*) FILTER (
+                        WHERE t.status IN (
+                            'PENDING',
+                            'IN_PROGRESS',
+                            'ROUTED'
+                        )
+                    ) AS active_queries,
+
+                    COUNT(*) FILTER (
+                        WHERE
+                            t.status = 'ESCALATED'
+                            OR t.created_at <
+                                NOW() - INTERVAL '48 hours'
+                    ) AS escalated_queries,
+
+                    COALESCE(
+                        ROUND(
+                            AVG(
+                                EXTRACT(
+                                    EPOCH FROM
+                                    (t.updated_at - t.created_at)
+                                ) / 3600
+                            )::numeric,
+                            1
+                        ),
+                        0
+                    ) AS avg_resolution_hours
+
+                FROM public.tickets t
+
+                LEFT JOIN public.users u
+                    ON t.assigned_officer_id = u.user_id
+
+                WHERE u.department_id =
+                    CAST(:department_id AS UUID)
+                """
+            ),
+            {
+                "department_id": department_id
+            }
         ).mappings().first()
 
-        # 2. Officer Workload
+
+        # =========================================================
+        # 2. OFFICER WORKLOAD
+        # =========================================================
         officer_load = db.execute(
-            text("""
-            SELECT u.full_name, COUNT(t.ticket_number) as active_tickets
-            FROM public.users u
-            LEFT JOIN public.tickets t ON u.user_id = t.assigned_officer_id 
-                AND t.status IN ('PENDING', 'IN_PROGRESS', 'ROUTED')
-            WHERE u.department_id = CAST(:department_id AS UUID) AND u.role = 'DEPARTMENT_STAFF'
-            GROUP BY u.full_name
-            """),
-            {"department_id": department_id}
+            text(
+                """
+                SELECT
+                    u.full_name,
+                    COUNT(t.ticket_number) AS active_tickets
+
+                FROM public.users u
+
+                LEFT JOIN public.tickets t
+                    ON u.user_id = t.assigned_officer_id
+
+                    AND t.status IN (
+                        'PENDING',
+                        'IN_PROGRESS',
+                        'ROUTED'
+                    )
+
+                WHERE
+                    u.department_id =
+                        CAST(:department_id AS UUID)
+
+                    AND u.role = 'DEPARTMENT_STAFF'
+
+                GROUP BY
+                    u.full_name
+                """
+            ),
+            {
+                "department_id": department_id
+            }
         ).mappings().all()
 
-        # 3. Escalated / Action Required Tickets Queue
+
+        # =========================================================
+        # 3. ALL DEPARTMENT TICKETS
+        # =========================================================
+        #
+        # IMPORTANT:
+        # This returns ALL tickets for the HOD's department.
+        # Previously the dashboard only received the
+        # action_required_queue.
+        #
+        # =========================================================
+        all_tickets = db.execute(
+            text(
+                """
+                SELECT
+                    t.ticket_number,
+                    t.subject,
+                    t.priority,
+                    t.status,
+                    t.created_at,
+                    t.updated_at,
+
+                    u.full_name AS assignee_name,
+
+                    ad.desk_name
+
+                FROM public.tickets t
+
+                LEFT JOIN public.users u
+                    ON t.assigned_officer_id = u.user_id
+
+                LEFT JOIN public.accounts_desks ad
+                    ON t.routed_desk_id = ad.desk_id
+
+                WHERE u.department_id =
+                    CAST(:department_id AS UUID)
+
+                ORDER BY
+                    t.created_at DESC
+                """
+            ),
+            {
+                "department_id": department_id
+            }
+        ).mappings().all()
+
+
+        # =========================================================
+        # 4. ESCALATED / ACTION REQUIRED QUEUE
+        # =========================================================
+        #
+        # This remains separate from ALL tickets.
+        # It is specifically for tickets that require HOD attention.
+        #
+        # =========================================================
         escalated_queue = db.execute(
-            text("""
-            SELECT 
-                t.ticket_number, t.subject, t.priority, t.status, 
-                t.created_at, u.full_name as assignee_name, ad.desk_name
-            FROM public.tickets t
-            LEFT JOIN public.users u ON t.assigned_officer_id = u.user_id
-            LEFT JOIN public.accounts_desks ad ON t.routed_desk_id = ad.desk_id
-            WHERE u.department_id = CAST(:department_id AS UUID) 
-              AND (t.status = 'ESCALATED' OR t.status = 'PENDING_APPROVAL' OR t.created_at < NOW() - INTERVAL '48 hours')
-            ORDER BY t.created_at ASC
-            """),
-            {"department_id": department_id}
+            text(
+                """
+                SELECT
+                    t.ticket_number,
+                    t.subject,
+                    t.priority,
+                    t.status,
+                    t.created_at,
+
+                    u.full_name AS assignee_name,
+
+                    ad.desk_name
+
+                FROM public.tickets t
+
+                LEFT JOIN public.users u
+                    ON t.assigned_officer_id = u.user_id
+
+                LEFT JOIN public.accounts_desks ad
+                    ON t.routed_desk_id = ad.desk_id
+
+                WHERE
+                    u.department_id =
+                        CAST(:department_id AS UUID)
+
+                    AND (
+                        t.status = 'ESCALATED'
+
+                        OR t.status = 'PENDING_APPROVAL'
+
+                        OR t.created_at <
+                            NOW() - INTERVAL '48 hours'
+                    )
+
+                ORDER BY
+                    t.created_at ASC
+                """
+            ),
+            {
+                "department_id": department_id
+            }
         ).mappings().all()
 
+
+        # =========================================================
+        # 5. RETURN DASHBOARD DATA
+        # =========================================================
         return {
-            "metrics": dict(stats) if stats else {},
-            "officer_workload": [dict(row) for row in officer_load],
-            "action_required_queue": [dict(row) for row in escalated_queue]
+            "metrics": (
+                dict(stats)
+                if stats
+                else {}
+            ),
+
+            "officer_workload": [
+                dict(row)
+                for row in officer_load
+            ],
+
+            "all_tickets": [
+                dict(row)
+                for row in all_tickets
+            ],
+
+            "action_required_queue": [
+                dict(row)
+                for row in escalated_queue
+            ]
         }
+
+
     except SQLAlchemyError as exc:
-        print(f"\n\n=== DB ERROR IN HOD DASHBOARD ===\n{str(exc)}\n=================================\n\n")
-        raise HTTPException(status_code=500, detail="Failed to load HOD dashboard stats.") from exc
+
+        print(
+            "\n\n"
+            "=== DB ERROR IN HOD DASHBOARD ===\n"
+            f"{str(exc)}\n"
+            "=================================\n\n"
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to load HOD dashboard stats."
+        ) from exc
+
     finally:
         db.close()
 
 
 def approve_or_reassign_ticket(
-    ticket_number: str, 
-    action: str, 
-    new_officer_id: str | None, 
+    ticket_number: str,
+    action: str,
+    new_officer_id: str | None,
     current_user: dict[str, Any]
 ) -> dict[str, Any]:
+
     db = SessionLocal()
+
     try:
-        if action in ["APPROVE", "REJECT"]:
-            new_status = "RESOLVED" if action == "APPROVE" else "IN_PROGRESS"
+
+        # =========================================================
+        # APPROVE / REJECT
+        # =========================================================
+        if action in [
+            "APPROVE",
+            "REJECT"
+        ]:
+
+            new_status = (
+                "RESOLVED"
+                if action == "APPROVE"
+                else "IN_PROGRESS"
+            )
+
             updated = db.execute(
-                text("""
-                UPDATE public.tickets 
-                SET status = :status, updated_at = NOW() 
-                WHERE ticket_number = :ticket_number 
-                RETURNING ticket_number, status
-                """),
-                {"status": new_status, "ticket_number": ticket_number}
-            ).mappings().first()
-            
-        elif action == "REASSIGN" and new_officer_id:
-            updated = db.execute(
-                text("""
-                UPDATE public.tickets 
-                SET assigned_officer_id = CAST(:new_officer_id AS UUID), status = 'ROUTED', updated_at = NOW() 
-                WHERE ticket_number = :ticket_number 
-                RETURNING ticket_number, assigned_officer_id, status
-                """),
-                {"new_officer_id": new_officer_id, "ticket_number": ticket_number}
+                text(
+                    """
+                    UPDATE public.tickets
+
+                    SET
+                        status = :status,
+                        updated_at = NOW()
+
+                    WHERE ticket_number = :ticket_number
+
+                    RETURNING
+                        ticket_number,
+                        status
+                    """
+                ),
+                {
+                    "status": new_status,
+                    "ticket_number": ticket_number
+                }
             ).mappings().first()
 
+
+        # =========================================================
+        # REASSIGN
+        # =========================================================
+        elif (
+            action == "REASSIGN"
+            and new_officer_id
+        ):
+
+            updated = db.execute(
+                text(
+                    """
+                    UPDATE public.tickets
+
+                    SET
+                        assigned_officer_id =
+                            CAST(
+                                :new_officer_id
+                                AS UUID
+                            ),
+
+                        status = 'ROUTED',
+
+                        updated_at = NOW()
+
+                    WHERE ticket_number =
+                        :ticket_number
+
+                    RETURNING
+                        ticket_number,
+                        assigned_officer_id,
+                        status
+                    """
+                ),
+                {
+                    "new_officer_id": new_officer_id,
+                    "ticket_number": ticket_number
+                }
+            ).mappings().first()
+
+        else:
+
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid ticket action."
+            )
+
+
+        if updated is None:
+
+            raise HTTPException(
+                status_code=404,
+                detail="Ticket not found."
+            )
+
+
         db.commit()
+
         return dict(updated)
-    except SQLAlchemyError as exc:
+
+
+    except HTTPException:
+
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Ticket {action.lower()} failed.") from exc
+        raise
+
+
+    except SQLAlchemyError as exc:
+
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ticket {action.lower()} failed."
+        ) from exc
+
+
     finally:
         db.close()
