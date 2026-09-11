@@ -1,17 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react'
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
-
-const cleanText = (value) => {
-  if (value === null || value === undefined) return ''
-
-  return String(value)
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-}
+import { useEffect, useMemo, useState } from 'react'
+import { getHodDashboard, performHodAction } from '../../services/ticketService'
+import { cleanText } from '../../utils/text'
 
 function HodDashboard({ profile, accessToken, onLogout }) {
   const [dashboardData, setDashboardData] = useState(null)
@@ -38,23 +27,7 @@ function HodDashboard({ profile, accessToken, onLogout }) {
     setErrorMessage('')
 
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/tickets/hod/dashboard`,
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            Accept: 'application/json',
-          },
-        }
-      )
-
-      const data = await response.json().catch(() => ({}))
-
-      if (!response.ok) {
-        throw new Error(
-          data.detail || `Server returned ${response.status}`
-        )
-      }
+      const data = await getHodDashboard(accessToken)
 
       setDashboardData(data)
       setCurrentPage(1)
@@ -68,7 +41,22 @@ function HodDashboard({ profile, accessToken, onLogout }) {
   }
 
   useEffect(() => {
-    loadHodDashboard()
+    if (!accessToken) return
+    const controller = new AbortController()
+    getHodDashboard(accessToken, controller.signal)
+      .then((data) => {
+        if (controller.signal.aborted) return
+        setDashboardData(data)
+        setCurrentPage(1)
+        setErrorMessage('')
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) setErrorMessage(error.message)
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false)
+      })
+    return () => controller.abort()
   }, [accessToken])
 
   // ============================================================
@@ -92,28 +80,10 @@ function HodDashboard({ profile, accessToken, onLogout }) {
     setSuccessMessage('')
 
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/tickets/${ticketNumber}/hod-action?action=${action}`,
-        {
-          method: 'PATCH',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            Accept: 'application/json',
-          },
-        }
-      )
-
-      const data = await response.json().catch(() => ({}))
-
-      if (!response.ok) {
-        throw new Error(
-          data.detail ||
-            `Failed to ${actionText} ticket.`
-        )
-      }
+      await performHodAction(accessToken, ticketNumber, action)
 
       setSuccessMessage(
-        `Ticket ${ticketNumber} has been successfully ${actionText}d.`
+        `Ticket ${ticketNumber} has been successfully ${action === 'APPROVE' ? 'approved' : 'rejected'}.`
       )
 
       await loadHodDashboard()

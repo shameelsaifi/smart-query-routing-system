@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
+import { createTicket, getStudentTickets } from '../../services/ticketService'
 
 function StudentDashboard({ profile, accessToken, onLogout }) {
   // Navigation & Tab States
@@ -29,23 +29,15 @@ function StudentDashboard({ profile, accessToken, onLogout }) {
       
       setLoadingTickets(true)
       try {
-        const response = await fetch(`${API_BASE_URL}/tickets`, {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        })
-        
-        if (response.ok) {
-          const data = await response.json()
-          // Map backend response fields to UI format if needed
-          const formatted = data.map((t) => ({
-            id: t.ticket_number || t.id,
-            subject: t.subject,
-            status: t.status || 'Pending',
-            date: t.created_at ? t.created_at.split('T')[0] : new Date().toISOString().split('T')[0],
-          }))
-          setRecentTickets(formatted)
-        }
+        const data = await getStudentTickets(accessToken)
+
+        const formatted = data.map((t) => ({
+          id: t.ticket_number || t.id,
+          subject: t.subject,
+          status: t.status || 'Pending',
+          date: t.created_at ? t.created_at.split('T')[0] : new Date().toISOString().split('T')[0],
+        }))
+        setRecentTickets(formatted)
       } catch (err) {
         console.error("Error fetching tickets:", err)
       } finally {
@@ -83,24 +75,11 @@ function StudentDashboard({ profile, accessToken, onLogout }) {
     setErrorMessage('')
 
     try {
-      const response = await fetch(`${API_BASE_URL}/tickets`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({
-          subject: subject.trim(),
-          message: message.trim(),
-          has_attachment: Boolean(attachment),
-        }),
+      const data = await createTicket(accessToken, {
+        subject: subject.trim(),
+        message: message.trim(),
+        has_attachment: Boolean(attachment),
       })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.detail || 'Query submission failed. Please try again.')
-      }
 
       setSubmittedTicket(data)
       

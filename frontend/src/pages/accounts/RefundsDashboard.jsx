@@ -1,157 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useAssignedTickets } from '../../hooks/useAssignedTickets'
+import { cleanText } from '../../utils/text'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL
-
-// Helper function to decode raw HTML entities
-const cleanText = (str) => {
-  if (typeof str !== 'string') return str || ''
-  return str
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-}
-
-function ScholarshipDashboard({
-  profile,
-  accessToken,
-  onLogout,
-}) {
-  const [tickets, setTickets] = useState([])
-  const [loading, setLoading] = useState(true)
-
-  const [startingTicket, setStartingTicket] = useState(null)
-  const [resolvingTicket, setResolvingTicket] = useState(null)
-
-  const [errorMessage, setErrorMessage] = useState('')
-  const [successMessage, setSuccessMessage] = useState('')
-
-  const loadTickets = async () => {
-    setLoading(true)
-    setErrorMessage('')
-
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/tickets/assigned-to-me`,
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        },
-      )
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(
-          data.detail || 'Assigned tickets could not be loaded.',
-        )
-      }
-
-      setTickets(Array.isArray(data) ? data : data.tickets || [])
-    } catch (error) {
-      setErrorMessage(error.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    loadTickets()
-  }, [accessToken])
-
-  // Handle Start Work Action
-  const handleStartWork = async (ticketNumber) => {
-    setStartingTicket(ticketNumber)
-    setErrorMessage('')
-    setSuccessMessage('')
-
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/tickets/${ticketNumber}/start`,
-        {
-          method: 'PATCH',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        },
-      )
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(
-          data.detail || 'Ticket status could not be updated.',
-        )
-      }
-
-      setTickets((currentTickets) =>
-        currentTickets.map((ticket) =>
-          (ticket.ticket_number || ticket.ticket_code) === ticketNumber
-            ? {
-                ...ticket,
-                status: data.status || 'IN_PROGRESS',
-              }
-            : ticket,
-        ),
-      )
-
-      setSuccessMessage(
-        `Ticket ${ticketNumber} is now in progress.`,
-      )
-    } catch (error) {
-      setErrorMessage(error.message)
-    } finally {
-      setStartingTicket(null)
-    }
-  }
-
-  // Handle Resolve Ticket Action
-  const handleResolveTicket = async (ticketNumber) => {
-    setResolvingTicket(ticketNumber)
-    setErrorMessage('')
-    setSuccessMessage('')
-
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}/tickets/${ticketNumber}/resolve`,
-        {
-          method: 'PATCH',
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        },
-      )
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(
-          data.detail || 'Ticket could not be resolved.',
-        )
-      }
-
-      setTickets((currentTickets) =>
-        currentTickets.map((ticket) =>
-          (ticket.ticket_number || ticket.ticket_code) === ticketNumber
-            ? {
-                ...ticket,
-                status: data.status || 'RESOLVED',
-              }
-            : ticket,
-        ),
-      )
-
-      setSuccessMessage(
-        `Ticket ${ticketNumber} has been resolved successfully.`,
-      )
-    } catch (error) {
-      setErrorMessage(error.message)
-    } finally {
-      setResolvingTicket(null)
-    }
-  }
+function RefundsDashboard({ profile, accessToken, onLogout }) {
+  const { tickets, loading, startingTicket, resolvingTicket, errorMessage,
+    successMessage, loadTickets, handleStartWork, handleResolveTicket } = useAssignedTickets(accessToken)
 
   // Helper for status badge styling
   const getStatusBadge = (status) => {
@@ -177,20 +29,20 @@ function ScholarshipDashboard({
           </div>
           <div>
             <span className="font-bold text-lg tracking-wide block leading-none">SmartQuery</span>
-            <span className="text-[10px] text-blue-400 font-medium">Accounts Desk • Scholarship</span>
+            <span className="text-[10px] text-blue-400 font-medium">Accounts Desk • Refunds</span>
           </div>
         </div>
 
         {/* User Profile & Logout */}
         <div className="flex items-center gap-4">
           <div className="text-right hidden sm:block">
-            <div className="text-xs font-semibold text-slate-200">{profile?.full_name || 'Scholarship Officer'}</div>
+            <div className="text-xs font-semibold text-slate-200">{profile?.full_name || 'Refunds Officer'}</div>
             <div className="flex items-center justify-end gap-1.5 mt-0.5">
-              <span className="px-1.5 py-0.2 text-[8px] font-bold text-amber-400 bg-amber-950/80 rounded border border-amber-800 uppercase">
+              <span className="px-1.5 py-0.2 text-[8px] font-bold text-teal-400 bg-teal-950/80 rounded border border-teal-800 uppercase">
                 {profile?.department_name || 'Accounts'}
               </span>
               <span className="text-[9px] text-slate-400">
-                {profile?.desk_name || 'Scholarship Desk'}
+                {profile?.desk_name || 'Refunds Desk'}
               </span>
             </div>
           </div>
@@ -207,7 +59,7 @@ function ScholarshipDashboard({
         </div>
       </header>
 
-      {/* Scrollable Dashboard Content */}
+      {/* Scrollable Dashboard Body */}
       <main className="flex-1 p-4 md:p-6 overflow-y-auto max-w-7xl mx-auto w-full space-y-5">
         
         {/* Top Info Banner */}
@@ -215,7 +67,7 @@ function ScholarshipDashboard({
           <div>
             <h1 className="text-xl font-bold text-slate-900">Accounts Officer Dashboard</h1>
             <p className="text-xs text-slate-500 mt-0.5">
-              Scholarship Desk queue for <span className="font-semibold text-slate-700">{profile?.full_name || 'Scholarship Officer'}</span>
+              Refunds Desk queue for <span className="font-semibold text-slate-700">{profile?.full_name || 'Refunds Officer'}</span>
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -261,7 +113,7 @@ function ScholarshipDashboard({
             <div className="w-12 h-12 bg-slate-100 text-slate-400 rounded-full flex items-center justify-center mx-auto mb-3">
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" /></svg>
             </div>
-            <h3 className="text-sm font-bold text-slate-800 mb-1">No Scholarship Tickets Assigned</h3>
+            <h3 className="text-sm font-bold text-slate-800 mb-1">No Refund Tickets Assigned</h3>
             <p className="text-xs text-slate-500">No tickets are currently assigned to you.</p>
           </div>
         )}
@@ -278,7 +130,7 @@ function ScholarshipDashboard({
             return (
               <div key={ticket.ticket_id || ticketNum} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
                 
-                {/* Ticket Top Header */}
+                {/* Ticket Header */}
                 <div className="bg-slate-50 border-b border-slate-200 px-5 py-3.5 flex flex-wrap justify-between items-center gap-2">
                   <div className="flex items-center gap-2.5">
                     <span className="font-mono text-sm font-bold text-slate-900 bg-slate-200/80 px-2.5 py-0.5 rounded border border-slate-300/80">
@@ -305,13 +157,13 @@ function ScholarshipDashboard({
                 {/* Ticket Body */}
                 <div className="p-5 grid grid-cols-1 lg:grid-cols-12 gap-5">
                   
-                  {/* Left Side: Student & Query Message */}
+                  {/* Left Side: Student Query Info */}
                   <div className="lg:col-span-7 space-y-3">
                     <div>
                       <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
                         <span>Student: <strong className="text-slate-800">{cleanText(studentName)}</strong></span>
                         <span>•</span>
-                        <span>Category: <strong className="text-blue-600">{cleanText(ticket.category || 'Scholarship')}</strong></span>
+                        <span>Category: <strong className="text-blue-600">{cleanText(ticket.category || 'Refunds')}</strong></span>
                       </div>
                       <h2 className="text-base font-bold text-slate-900">{cleanText(ticket.subject || ticket.title)}</h2>
                     </div>
@@ -412,4 +264,4 @@ function ScholarshipDashboard({
   )
 }
 
-export default ScholarshipDashboard
+export default RefundsDashboard
