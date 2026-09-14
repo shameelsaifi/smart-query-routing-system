@@ -1,278 +1,314 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { provisionUser as provisionApplicationUser } from '../services/authService'
-import { readStoredProfile, storeProfile, clearStoredProfile } from '../utils/profileStorage'
+import { ApiError } from '../services/apiClient'
+import { getCurrentProfile, provisionUser } from '../services/authService'
+import { clearStoredProfile } from '../utils/profileStorage'
+
+const EMPTY_PROFILE = {
+  userId: null,
+  requestKey: null,
+  profile: null,
+  error: null,
+}
+
+const ROLES = new Set([
+  'STUDENT', 'INSTRUCTOR', 'DEPARTMENT_STAFF', 'HOD', 'ADMIN',
+])
+
+function profileError(error) {
+  return {
+    kind: error.status === 403
+      ? 'access'
+      : error.status === 401 ? 'session' : 'service',
+    message: error.message || 'Your account could not be verified.',
+  }
+}
 
 export function useAuth() {
-  const storedProfile = readStoredProfile()
+  const [authState, setAuthState] = useState({
+    session: null,
+    initialized: false,
+    version: 0,
+    error: null,
+  })
 
-  const [session, setSession] = useState(null)
+  const [profileState, setProfileState] = useState(EMPTY_PROFILE)
+  const [refreshVersion, setRefreshVersion] = useState(0)
+  const [loginLoading, setLoginLoading] = useState(false)
+  const [signingOut, setSigningOut] = useState(false)
+  const [actionError, setActionError] = useState(null)
 
-  const [profile, setProfile] = useState(
-    storedProfile?.profile || null,
-  )
+  const verifiedUserRef = useRef(null)
+  const profileRequestRef = useRef(null)
+  const authEventVersionRef = useRef(0)
 
-  const [authLoading, setAuthLoading] =
-    useState(true)
-
-  const [loginLoading, setLoginLoading] =
-    useState(false)
-
-  const [provisioning, setProvisioning] =
-    useState(false)
-
-  const [errorMessage, setErrorMessage] =
-    useState('')
-
-  // Prevent repeated provisioning caused by token refresh.
-  const provisionedUserRef = useRef(
-    storedProfile?.user_id || null,
-  )
-
+  const session = authState.session
   const sessionUserId = session?.user?.id
-  const sessionAccessToken =
-    session?.access_token
+  const sessionAccessToken = session?.access_token
+  const requestKey = `${authState.version}:${refreshVersion}`
 
-  // --------------------------------------------------
-  // Supabase authentication/session handling
-  // --------------------------------------------------
   useEffect(() => {
-    let mounted = true
+    let active = true
+    let currentUserId = null
+    const startupVersion = authEventVersionRef.current
 
-    const initAuth = async () => {
-      try {
-        const { data, error } =
-          await supabase.auth.getSession()
+    clearStoredProfile()
 
-        if (error) {
-          throw error
-        }
+    const applySession = (nextSession) => {
+      if (!active) return
 
-        if (!mounted) {
-          return
-        }
+      authEventVersionRef.current += 1
+      profileRequestRef.current?.abort()
 
-        const currentSession = data.session
+      const nextUserId = nextSession?.user?.id || null
 
-        setSession(currentSession)
-
-        // Restore cached application profile
-        // only when it belongs to the current user.
-        if (currentSession?.user?.id) {
-          const cachedProfile =
-            readStoredProfile()
-
-          if (
-            cachedProfile?.user_id ===
-            currentSession.user.id
-          ) {
-            setProfile(
-              cachedProfile.profile,
-            )
-
-            provisionedUserRef.current =
-              currentSession.user.id
-          }
-        }
-      } catch (error) {
-        console.error(
-          'Error fetching Supabase session:',
-          error,
-        )
-
-        if (mounted) {
-          setErrorMessage(
-            error.message ||
-              'Authentication session could not be loaded.',
-          )
-        }
-      } finally {
-        if (mounted) {
-          setAuthLoading(false)
-        }
+      if (nextUserId !== currentUserId || !nextUserId) {
+        verifiedUserRef.current = null
+        setProfileState(EMPTY_PROFILE)
+        clearStoredProfile()
       }
+
+      currentUserId = nextUserId
+
+      setActionError(null)
+      setLoginLoading(false)
+
+      setAuthState((previous) => ({
+        session: nextSession || null,
+        initialized: true,
+        version: previous.version + 1,
+        error: null,
+      }))
     }
 
-    initAuth()
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(
-      (event, newSession) => {
-        if (!mounted) {
-          return
-        }
-
-        /*
-         * TOKEN_REFRESHED and other session updates
-         * should NOT clear the existing profile.
-         *
-         * This is important because Supabase can
-         * refresh the access token while the user is
-         * already using the dashboard.
-         */
-        if (event === 'SIGNED_OUT') {
-          setSession(null)
-          setProfile(null)
-          setErrorMessage('')
-          setLoginLoading(false)
-          setProvisioning(false)
-
-          provisionedUserRef.current = null
-
-          clearStoredProfile()
-        } else {
-          setSession(newSession)
-        }
-
-        setAuthLoading(false)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, nextSession) => {
+        applySession(event === 'SIGNED_OUT' ? null : nextSession)
       },
     )
 
+    const loadSession = async () => {
+      try {
+        const { data, error } = await supabase.auth.getSession()
+
+        if (!active || authEventVersionRef.current !== startupVersion) return
+        if (error) throw error
+
+        applySession(data.session)
+      } catch {
+        if (!active || authEventVersionRef.current !== startupVersion) return
+
+        setAuthState((previous) => ({
+          ...previous,
+          initialized: true,
+          error: {
+            kind: 'service',
+            message: 'Your login session could not be loaded. Please try signing in again.',
+          },
+        }))
+      }
+    }
+
+    void loadSession()
+
     return () => {
-      mounted = false
+      active = false
       subscription.unsubscribe()
     }
   }, [])
 
-  // --------------------------------------------------
-  // Application profile provisioning
-  // --------------------------------------------------
   useEffect(() => {
-    if (
-      !sessionUserId ||
-      !sessionAccessToken
-    ) {
-      return
-    }
+    if (!sessionUserId || !sessionAccessToken) return
 
-    /*
-     * VERY IMPORTANT:
-     *
-     * Once this user has already been provisioned,
-     * a refreshed access token must NOT trigger
-     * another provisioning request.
-     */
-    if (
-      provisionedUserRef.current ===
-      sessionUserId
-    ) {
-      return
-    }
+    let active = true
+    let timedOut = false
+    const controller = new AbortController()
 
-    provisionedUserRef.current =
-      sessionUserId
+    profileRequestRef.current = controller
 
-    let cancelled = false
-    let completed = false
+    const timeout = window.setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, 20000)
 
-    const provisionUser = async () => {
-      setProvisioning(true)
-      setErrorMessage('')
-
+    const verifyProfile = async () => {
       try {
-        const data = await provisionApplicationUser(sessionAccessToken)
+        let data
 
-        if (cancelled) {
-          return
+        try {
+          data = await getCurrentProfile(sessionAccessToken, controller.signal)
+        } catch (error) {
+          if (
+            controller.signal.aborted
+            || error.status !== 403
+            || verifiedUserRef.current === sessionUserId
+          ) throw error
+
+          // The backend may create a missing profile only after approval checks.
+          data = await provisionUser(sessionAccessToken, controller.signal)
         }
 
-        completed = true
-        setProfile(data)
+        if (!active || controller.signal.aborted) return
 
-        storeProfile(
-          sessionUserId,
-          data,
-        )
+        if (!data || data.user_id !== sessionUserId || !ROLES.has(data.role)) {
+          throw new ApiError('The server returned an invalid account profile.', 502)
+        }
+
+        if (data.is_active !== true) {
+          throw new ApiError('Access denied. This account has been disabled.', 403)
+        }
+
+        verifiedUserRef.current = sessionUserId
+
+        setProfileState({
+          userId: sessionUserId,
+          requestKey,
+          profile: data,
+          error: null,
+        })
       } catch (error) {
-        console.error(
-          'User provisioning error:',
-          error,
-        )
+        if (!active || (controller.signal.aborted && !timedOut)) return
 
-        if (cancelled) {
-          return
-        }
-
-        /*
-         * If an already-loaded profile exists,
-         * do NOT remove it just because a background
-         * provisioning request failed.
-         *
-         * This prevents the dashboard from suddenly
-         * disappearing.
-         */
-        if (!profile) {
-          setProfile(null)
-          setErrorMessage(
-            error.message ||
-              'User provisioning failed.',
-          )
-
-          provisionedUserRef.current =
-            null
-        }
+        setProfileState({
+          userId: sessionUserId,
+          requestKey,
+          profile: null,
+          error: timedOut
+            ? {
+                kind: 'service',
+                message: 'Account verification timed out. Please try again.',
+              }
+            : profileError(error),
+        })
       } finally {
-        if (!cancelled) {
-          setProvisioning(false)
+        window.clearTimeout(timeout)
+
+        if (profileRequestRef.current === controller) {
+          profileRequestRef.current = null
         }
       }
     }
 
-    provisionUser()
+    void verifyProfile()
 
     return () => {
-      cancelled = true
-      if (!completed) provisionedUserRef.current = null
+      active = false
+      window.clearTimeout(timeout)
+      controller.abort()
+
+      if (profileRequestRef.current === controller) {
+        profileRequestRef.current = null
+      }
     }
-  }, [
-    sessionUserId,
-    sessionAccessToken,
-    profile,
-  ])
+  }, [sessionUserId, sessionAccessToken, requestKey])
 
-  // --------------------------------------------------
-  // Google Login
-  // --------------------------------------------------
-  const handleGoogleLogin = async () => {
+  const retryProfile = useCallback(() => {
+    profileRequestRef.current?.abort()
+    setActionError(null)
+    setRefreshVersion((previous) => previous + 1)
+  }, [])
+
+  useEffect(() => {
+    const recheck = () => {
+      if (
+        document.visibilityState === 'hidden'
+        || profileRequestRef.current
+      ) return
+
+      retryProfile()
+    }
+
+    window.addEventListener('focus', recheck)
+    window.addEventListener('online', recheck)
+
+    return () => {
+      window.removeEventListener('focus', recheck)
+      window.removeEventListener('online', recheck)
+    }
+  }, [retryProfile])
+
+  const handleGoogleLogin = useCallback(async () => {
     setLoginLoading(true)
-    setErrorMessage('')
+    setActionError(null)
 
-    const { error } =
-      await supabase.auth.signInWithOAuth({
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo:
-            window.location.origin,
-          queryParams: {
-            prompt: 'select_account',
-          },
+          redirectTo: window.location.origin,
+          queryParams: { prompt: 'select_account' },
         },
       })
 
-    if (error) {
-      setErrorMessage(error.message)
+      if (error) throw error
+    } catch {
       setLoginLoading(false)
+
+      setActionError({
+        kind: 'service',
+        message: 'Google sign-in could not start. Check your connection and try again.',
+      })
     }
+  }, [])
+
+  const handleLogout = useCallback(async () => {
+    setSigningOut(true)
+    setActionError(null)
+
+    try {
+      const { error } = await supabase.auth.signOut({ scope: 'local' })
+
+      if (error) throw error
+
+      authEventVersionRef.current += 1
+      profileRequestRef.current?.abort()
+      verifiedUserRef.current = null
+
+      clearStoredProfile()
+      setProfileState(EMPTY_PROFILE)
+      setLoginLoading(false)
+
+      setAuthState((previous) => ({
+        session: null,
+        initialized: true,
+        version: previous.version + 1,
+        error: null,
+      }))
+    } catch {
+      setActionError({
+        kind: 'service',
+        message: 'Sign out could not complete. Check your connection and try Sign Out again.',
+      })
+    } finally {
+      setSigningOut(false)
+    }
+  }, [])
+
+  const sameUser = Boolean(
+    sessionUserId && profileState.userId === sessionUserId,
+  )
+
+  const currentCheck = sameUser && profileState.requestKey === requestKey
+  const profile = sameUser ? profileState.profile : null
+
+  const error = actionError
+    || authState.error
+    || (currentCheck ? profileState.error : null)
+
+  return {
+    session,
+    profile,
+    authLoading: !authState.initialized,
+    loginLoading,
+    signingOut,
+    provisioning: Boolean(
+      sessionUserId && sessionAccessToken && !currentCheck,
+    ),
+    errorMessage: error?.message || '',
+    errorKind: error?.kind || '',
+    sessionAccessToken,
+    handleGoogleLogin,
+    handleLogout,
+    retryProfile,
   }
-
-  // --------------------------------------------------
-  // Logout
-  // --------------------------------------------------
-  const handleLogout = async () => {
-    await supabase.auth.signOut()
-
-    setSession(null)
-    setProfile(null)
-    setErrorMessage('')
-    setLoginLoading(false)
-    setProvisioning(false)
-
-    provisionedUserRef.current = null
-
-    clearStoredProfile()
-  }
-
-  return { session, profile, authLoading, loginLoading, provisioning, errorMessage,
-    sessionAccessToken, handleGoogleLogin, handleLogout }
 }

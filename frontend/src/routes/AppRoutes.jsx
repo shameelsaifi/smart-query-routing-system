@@ -12,69 +12,95 @@ const ScholarshipDashboard = lazy(() => import('../pages/accounts/ScholarshipDas
 const HodDashboard = lazy(() => import('../pages/hod/HodDashboard'))
 const StudentDashboard = lazy(() => import('../pages/student/StudentDashboard'))
 
-export default function AppRoutes() {
-  const { session, profile, authLoading, loginLoading, provisioning, errorMessage,
-    sessionAccessToken, handleGoogleLogin, handleLogout } = useAuth()
+const dashboardRoutes = [
+  {
+    path: '/student',
+    role: 'STUDENT',
+    Component: StudentDashboard,
+  },
+  {
+    path: '/hod',
+    role: 'HOD',
+    Component: HodDashboard,
+  },
+  {
+    path: '/accounts/fee-billing',
+    role: 'DEPARTMENT_STAFF',
+    desk: 'FEE_BILLING',
+    Component: FeeBillingDashboard,
+  },
+  {
+    path: '/accounts/scholarship',
+    role: 'DEPARTMENT_STAFF',
+    desk: 'SCHOLARSHIP',
+    Component: ScholarshipDashboard,
+  },
+  {
+    path: '/accounts/refunds',
+    role: 'DEPARTMENT_STAFF',
+    desk: 'REFUNDS',
+    Component: RefundsDashboard,
+  },
+]
 
-  // --------------------------------------------------
-  // Initial authentication loading
-  // --------------------------------------------------
-  if (authLoading) {
-    return (
-      <PageLoader message="Checking authentication..." />
-    )
+export default function AppRoutes() {
+  const {
+    session,
+    profile,
+    authLoading,
+    loginLoading,
+    signingOut,
+    provisioning,
+    errorMessage,
+    errorKind,
+    sessionAccessToken,
+    handleGoogleLogin,
+    handleLogout,
+    retryProfile,
+  } = useAuth()
+
+  if (signingOut) {
+    return <PageLoader message="Signing out..." />
   }
 
-  // --------------------------------------------------
-  // Not logged in
-  // --------------------------------------------------
+  if (authLoading) {
+    return <PageLoader message="Checking authentication..." />
+  }
+
   if (!session) {
     return (
       <LoginPage
-        onGoogleLogin={
-          handleGoogleLogin
-        }
+        onGoogleLogin={handleGoogleLogin}
         loading={loginLoading}
         errorMessage={errorMessage}
       />
     )
   }
 
-  /*
-   * IMPORTANT FIX:
-   *
-   * We DO NOT show "Checking account access..."
-   * whenever provisioning runs.
-   *
-   * If an existing profile is available,
-   * keep the dashboard visible.
-   *
-   * Only show the provisioning screen when
-   * there is NO profile available yet.
-   */
   if (!profile && provisioning) {
-    return (
-      <PageLoader message="Checking account access..." />
-    )
+    return <PageLoader message="Checking account access..." />
   }
 
-  // --------------------------------------------------
-  // Profile error
-  // --------------------------------------------------
   if (errorMessage || !profile) {
+    const title = errorKind === 'access'
+      ? 'Access Denied'
+      : errorKind === 'session'
+        ? 'Session verification failed'
+        : 'Unable to verify account'
+
     return (
       <AccessDenied
+        title={title}
         message={
-          errorMessage ||
-          'Your application profile could not be loaded.'
+          errorMessage || 'Your application profile could not be loaded.'
         }
+        onRetry={retryProfile}
         onLogout={handleLogout}
       />
     )
   }
 
-  const dashboardPath =
-    getDashboardPath(profile)
+  const dashboardPath = getDashboardPath(profile)
 
   if (!dashboardPath) {
     return (
@@ -85,141 +111,42 @@ export default function AppRoutes() {
     )
   }
 
-  // --------------------------------------------------
-  // Application Routes
-  // --------------------------------------------------
+  const dashboardProps = {
+    profile,
+    accessToken: sessionAccessToken,
+    onLogout: handleLogout,
+  }
+
   return (
     <Suspense fallback={<PageLoader message="Loading dashboard..." />}>
-    <Routes>
-      <Route
-        path="/"
-        element={
-          <Navigate
-            to={dashboardPath}
-            replace
+      <Routes>
+        <Route
+          path="/"
+          element={<Navigate to={dashboardPath} replace />}
+        />
+
+        {dashboardRoutes.map(({ path, role, desk, Component }) => (
+          <Route
+            key={path}
+            path={path}
+            element={
+              profile.role === role && (!desk || profile.desk_code === desk)
+                ? <Component {...dashboardProps} />
+                : <Navigate to={dashboardPath} replace />
+            }
           />
-        }
-      />
+        ))}
 
-      <Route
-        path="/student"
-        element={
-          profile.role === 'STUDENT' ? (
-            <StudentDashboard
-              profile={profile}
-              accessToken={
-                sessionAccessToken
-              }
-              onLogout={handleLogout}
-            />
-          ) : (
+        <Route
+          path="*"
+          element={
             <AccessDenied
-              message="Student access required."
+              message="This page does not exist or you are not authorized to access it."
               onLogout={handleLogout}
             />
-          )
-        }
-      />
-
-      <Route
-        path="/hod"
-        element={
-          profile.role === 'HOD' ? (
-            <HodDashboard
-              profile={profile}
-              accessToken={
-                sessionAccessToken
-              }
-              onLogout={handleLogout}
-            />
-          ) : (
-            <AccessDenied
-              message="HOD access required."
-              onLogout={handleLogout}
-            />
-          )
-        }
-      />
-
-      <Route
-        path="/accounts/fee-billing"
-        element={
-          profile.role ===
-            'DEPARTMENT_STAFF' &&
-          profile.desk_code ===
-            'FEE_BILLING' ? (
-            <FeeBillingDashboard
-              profile={profile}
-              accessToken={
-                sessionAccessToken
-              }
-              onLogout={handleLogout}
-            />
-          ) : (
-            <AccessDenied
-              message="Fee & Billing Desk access denied."
-              onLogout={handleLogout}
-            />
-          )
-        }
-      />
-
-      <Route
-        path="/accounts/scholarship"
-        element={
-          profile.role ===
-            'DEPARTMENT_STAFF' &&
-          profile.desk_code ===
-            'SCHOLARSHIP' ? (
-            <ScholarshipDashboard
-              profile={profile}
-              accessToken={
-                sessionAccessToken
-              }
-              onLogout={handleLogout}
-            />
-          ) : (
-            <AccessDenied
-              message="Scholarship Desk access denied."
-              onLogout={handleLogout}
-            />
-          )
-        }
-      />
-
-      <Route
-        path="/accounts/refunds"
-        element={
-          profile.role ===
-            'DEPARTMENT_STAFF' &&
-          profile.desk_code ===
-            'REFUNDS' ? (
-            <RefundsDashboard
-              profile={profile}
-              accessToken={
-                sessionAccessToken
-              }
-              onLogout={handleLogout}
-            />
-          ) : (
-            <AccessDenied
-              message="Refunds Desk access denied."
-              onLogout={handleLogout}
-            />
-          )
-        }
-      />
-
-      <Route
-        path="*"
-        element={
-          <AccessDenied
-            message="This page does not exist or you are not authorized to access it."
-            onLogout={handleLogout}
-          />
-        }
-      />
-    </Routes>
+          }
+        />
+      </Routes>
     </Suspense>
   )
 }
