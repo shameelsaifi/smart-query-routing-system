@@ -1,11 +1,15 @@
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import (
+    APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status,
+)
 
 from app.core.rbac import require_role
 from app.core.service_auth import require_email_intake_service
+from app.schemas.student_ticket import StudentTicketFilters, StudentTicketPage
 from app.schemas.ticket import TicketCreate, TicketCreateResponse
 from app.services.processing_pipeline_service import process_ticket_pipeline
+from app.services.student_ticket_service import get_student_tickets
 from app.services.ticket_service import create_ticket, get_assigned_tickets
 from app.services.ticket_workflow_service import (
     approve_or_reassign_ticket,
@@ -16,6 +20,20 @@ from app.services.ticket_workflow_service import (
 
 
 router = APIRouter()
+
+
+@router.get(
+    "",
+    response_model=StudentTicketPage,
+    summary="Get the current student's ticket history",
+)
+def student_ticket_history(
+    response: Response,
+    filters: Annotated[StudentTicketFilters, Query()],
+    current_user: dict[str, Any] = Depends(require_role("STUDENT")),
+) -> StudentTicketPage:
+    response.headers["Cache-Control"] = "no-store"
+    return get_student_tickets(current_user, filters)
 
 
 @router.post(

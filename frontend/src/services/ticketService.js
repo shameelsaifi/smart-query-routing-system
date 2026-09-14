@@ -7,10 +7,26 @@ export function createTicket(accessToken, payload) {
   })
 }
 
-// The student history screen already uses this path. Its backend GET handler
-// remains a separate implementation task; this refactor does not add that API.
-export function getStudentTickets(accessToken, signal) {
-  return apiRequest('/tickets', { accessToken, signal })
+export async function getStudentTickets(accessToken, filters = {}, signal) {
+  const query = new URLSearchParams({
+    page: String(filters.page ?? 1),
+    page_size: String(filters.pageSize ?? 10),
+  })
+  if (filters.search?.trim()) query.set('search', filters.search.trim())
+  if (filters.status) query.set('status', filters.status)
+  if (filters.source) query.set('source', filters.source)
+
+  const data = await apiRequest(`/tickets?${query}`, {
+    accessToken, signal,
+    errorMessage: 'Ticket history could not be loaded. Please try again.',
+  })
+  if (
+    !Array.isArray(data?.items) || !Number.isInteger(data.total)
+    || !Number.isInteger(data.page) || !Number.isInteger(data.total_pages)
+  ) {
+    throw new Error('Ticket history returned an unexpected response.')
+  }
+  return data
 }
 
 export async function getAssignedTickets(accessToken, signal) {
