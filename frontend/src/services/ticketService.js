@@ -29,6 +29,55 @@ export async function getStudentTickets(accessToken, filters = {}, signal) {
   return data
 }
 
+export async function getStudentTicketDetails(
+  accessToken, ticketNumber, { beforeSequence = null, signal } = {},
+) {
+  if (signal?.aborted) throw new DOMException('Request cancelled.', 'AbortError')
+
+  const controller = new AbortController()
+  const cancel = () => controller.abort()
+  signal?.addEventListener('abort', cancel, { once: true })
+  const timeout = window.setTimeout(() => controller.abort(), 15000)
+
+  const query = new URLSearchParams()
+  if (beforeSequence !== null) query.set('before_sequence', beforeSequence)
+  const suffix = query.size ? `?${query}` : ''
+
+  try {
+    const data = await apiRequest(
+      `/tickets/${encodeURIComponent(ticketNumber)}${suffix}`,
+      {
+        accessToken, signal: controller.signal, cache: 'no-store',
+        errorMessage: 'Ticket details could not be loaded. Please try again.',
+      },
+    )
+
+    if (
+      data?.ticket?.ticket_number !== ticketNumber
+      || !Array.isArray(data?.history)
+      || (
+        data.next_before_sequence !== null
+        && (
+          typeof data.next_before_sequence !== 'string'
+          || !/^[1-9]\d*$/.test(data.next_before_sequence)
+        )
+      )
+    ) {
+      throw new Error('Ticket details returned an unexpected response.')
+    }
+
+    return data
+  } catch (error) {
+    if (controller.signal.aborted && !signal?.aborted) {
+      throw new Error('Ticket request timed out. Please retry.', { cause: error })
+    }
+    throw error
+  } finally {
+    window.clearTimeout(timeout)
+    signal?.removeEventListener('abort', cancel)
+  }
+}
+
 export async function getAssignedTickets(accessToken, signal) {
   const data = await apiRequest('/tickets/assigned-to-me', {
     accessToken, signal, errorMessage: 'Assigned tickets could not be loaded.',
