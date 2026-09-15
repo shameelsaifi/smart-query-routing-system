@@ -15,6 +15,7 @@ class Settings(BaseSettings):
 
     supabase_url: str
     supabase_publishable_key: str
+    supabase_secret_key: SecretStr | None = None
 
     gemini_api_key: str
     email_intake_api_key: SecretStr | None = None
