@@ -1,328 +1,717 @@
 import { useEffect, useRef, useState } from 'react'
 import { createTicket, getStudentTickets } from '../../services/ticketService'
-function StudentDashboard({ profile, accessToken, onLogout }) {
-  // Navigation & Tab States
-  const [activeTab, setActiveTab] = useState('new_query') // 'new_query' | 'history'
-  
-  // Form & Search States
-  const [subject, setSubject] = useState('')
-  const [message, setMessage] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [draftSaving, setDraftSaving] = useState(false)
-  const [draftAttemptId, setDraftAttemptId] = useState(null)
-  const [submittedTicket, setSubmittedTicket] = useState(null)
-  const [errorMessage, setErrorMessage] = useState('')
-  const [validationError, setValidationError] = useState(false)
+import { createStudentDraft } from '../../services/studentDraftService'
+import StudentDraftEditor from '../../components/student/StudentDraftEditor'
+import StudentTicketDetails from '../../components/student/StudentTicketDetails'
 
-  // Ticket History State (FIXED: Started as empty array)
-  const [recentTickets, setRecentTickets] = useState([])
-  const [loadingTickets, setLoadingTickets] = useState(false)
+const INITIAL_FILTERS = {
+  search: '', status: '', source: '', page: 1, pageSize: 10,
+}
 
-  // Fetch logged-in user's actual tickets from backend
-  useEffect(() => {
-    const fetchUserTickets = async () => {
-      if (!accessToken) return
-      
-      setLoadingTickets(true)
-      try {
-        const data = await getStudentTickets(accessToken)
+const STATUS_LABELS = {
+  DRAFT: 'Draft',
+  PENDING: 'Pending',
+  CLASSIFIED: 'Classified',
+  ROUTED: 'Routed',
+  IN_PROGRESS: 'In progress',
+  NEEDS_INFORMATION: 'Needs information',
+  ESCALATED: 'Escalated',
+  RESOLVED: 'Resolved',
+  CLOSED: 'Closed',
+}
 
-        const formatted = data.map((t) => ({
-          id: t.ticket_number || t.id,
-          subject: t.subject,
-          status: t.status || 'Pending',
-          date: t.created_at ? t.created_at.split('T')[0] : new Date().toISOString().split('T')[0],
-        }))
-        setRecentTickets(formatted)
-      } catch (err) {
-        console.error("Error fetching tickets:", err)
-      } finally {
-        setLoadingTickets(false)
-      }
-    }
+const inputClass = 'mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+const buttonClass = 'rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
+const primaryClass = 'rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50'
 
-    fetchUserTickets()
-  }, [accessToken])
+function formatDate(value) {
+  if (!value) return 'Date unavailable'
 
-  const maxSubjectLen = 150
-  const maxMessageLen = 3000
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'Date unavailable'
 
-  const handleFileChange = (e) => {
-    const file = e.target.files[0]
-    if (file && file.size > 5 * 1024 * 1024) {
-      setErrorMessage('File size exceeds 5MB limit.')
-      return
-    }
-    setAttachment(file)
-    setErrorMessage('')
+  return date.toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  })
+}
+
+function statusClass(value) {
+  if (['RESOLVED', 'CLOSED'].includes(value)) {
+    return 'bg-emerald-50 text-emerald-800'
   }
 
-  const handleSubmit = async (event) => {
-    event.preventDefault()
+  if (['ESCALATED', 'NEEDS_INFORMATION'].includes(value)) {
+    return 'bg-amber-50 text-amber-900'
+  }
 
-    if (!subject.trim() || !message.trim()) {
-      setSubmitError('Subject and message are required.')
+  return 'bg-blue-50 text-blue-800'
+}
+
+function StudentDashboard({ profile, accessToken, onLogout }) {
+  const [activeTab, setActiveTab] = useState('new_query')
+  const [selectedTicket, setSelectedTicket] = useState(null)
+
+  const [subject, setSubject] = useState('')
+  const [message, setMessage] = useState('')
+  const [formAction, setFormAction] = useState('')
+  const [formError, setFormError] = useState('')
+  const [submittedTicket, setSubmittedTicket] = useState(null)
+
+  const mutation = useRef(null)
+  const draftAttempt = useRef(null)
+  const busy = Boolean(formAction)
+
+  const [filters, setFilters] = useState(INITIAL_FILTERS)
+  const [refreshVersion, setRefreshVersion] = useState(0)
+  const [historyResult, setHistoryResult] = useState(null)
+
+  const requestKey = JSON.stringify([
+    profile?.user_id,
+    accessToken,
+    filters,
+    refreshVersion,
+  ])
+
+  const currentResult = historyResult?.key === requestKey
+    ? historyResult
+    : null
+
+  const history = currentResult?.data
+  const historyLoading = Boolean(accessToken) && currentResult === null
+
+  const historyError = !accessToken
+    ? 'Your session is unavailable. Please sign in again.'
+    : currentResult?.error || ''
+
+  useEffect(() => {
+    return () => {
+      if (mutation.current) mutation.current.cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (activeTab !== 'history' || selectedTicket || !accessToken) return
+
+    const controller = new AbortController()
+    let active = true
+    let timeout
+
+    const delay = window.setTimeout(() => {
+      timeout = window.setTimeout(() => {
+        if (!active) return
+
+        setHistoryResult({
+          key: requestKey,
+          error: 'Ticket request timed out. Please retry.',
+        })
+
+        controller.abort()
+      }, 15000)
+
+      getStudentTickets(accessToken, filters, controller.signal)
+        .then((data) => {
+          if (active && !controller.signal.aborted) {
+            setHistoryResult({ key: requestKey, data })
+          }
+        })
+        .catch((error) => {
+          if (active && !controller.signal.aborted) {
+            setHistoryResult({
+              key: requestKey,
+              error: error.message || 'Ticket history could not be loaded.',
+            })
+          }
+        })
+        .finally(() => window.clearTimeout(timeout))
+    }, 250)
+
+    return () => {
+      active = false
+      window.clearTimeout(delay)
+      window.clearTimeout(timeout)
+      controller.abort()
+    }
+  }, [activeTab, selectedTicket, accessToken, filters, requestKey])
+
+  const refreshHistory = () => {
+    setRefreshVersion((value) => value + 1)
+  }
+
+  const openHistory = () => {
+    if (mutation.current) return
+
+    setSelectedTicket(null)
+    setActiveTab('history')
+    refreshHistory()
+  }
+
+  const openTicket = (ticket) => {
+    setSelectedTicket({
+      number: ticket.ticket_number,
+      view: ticket.status === 'DRAFT' ? 'draft' : 'details',
+    })
+  }
+
+  const onDraftSubmitted = (ticketNumber) => {
+    setSelectedTicket({
+      number: ticketNumber,
+      view: 'details',
+    })
+
+    setActiveTab('history')
+    refreshHistory()
+  }
+
+  const changeFilter = (name, value) => {
+    setFilters((current) => ({
+      ...current,
+      [name]: value,
+      page: 1,
+    }))
+  }
+
+  const clearForm = () => {
+    setSubject('')
+    setMessage('')
+    setFormError('')
+    setSubmittedTicket(null)
+    draftAttempt.current = null
+  }
+
+  const handleLogout = () => {
+    if (mutation.current) return
+
+    if (
+      (subject || message || selectedTicket?.view === 'draft')
+      && !window.confirm('Sign out? Any unsaved changes will be lost.')
+    ) return
+
+    onLogout()
+  }
+
+  const performFormAction = async (mode) => {
+    if (mutation.current) return
+
+    const payload = {
+      subject: subject.trim(),
+      message: message.trim(),
+    }
+
+    if (!accessToken) {
+      setFormError('Your session is unavailable. Please sign in again.')
       return
     }
 
-    submitLock.current = true
-    setSubmitting(true)
-    setSubmitError('')
+    if (!payload.subject && !payload.message) {
+      setFormError('Enter a subject or message before saving a draft.')
+      return
+    }
+
+    if (mode === 'submit' && (!payload.subject || !payload.message)) {
+      setFormError('Subject and message are required before submitting.')
+      return
+    }
+
+    const request = { cancelled: false }
+    mutation.current = request
+
+    setFormAction(mode)
+    setFormError('')
     setSubmittedTicket(null)
-    setErrorMessage('')
 
     try {
-      const ticket = await createTicket(accessToken, {
-        subject: subject.trim(),
-        message: message.trim(),
-      })
-      setSubmittedTicket(ticket)
-      setSubject('')
-      setMessage('')
-      refreshHistory()
+      if (mode === 'draft') {
+        const previous = draftAttempt.current
+
+        if (
+          !previous
+          || previous.subject !== payload.subject
+          || previous.message !== payload.message
+        ) {
+          draftAttempt.current = {
+            ...payload,
+            request_id: crypto.randomUUID(),
+          }
+        }
+
+        const draft = await createStudentDraft(
+          accessToken,
+          draftAttempt.current,
+        )
+
+        if (request.cancelled) return
+
+        clearForm()
+        setActiveTab('history')
+        openTicket(draft)
+        refreshHistory()
+      } else {
+        const ticket = await createTicket(accessToken, payload)
+
+        if (request.cancelled) return
+
+        clearForm()
+        setSubmittedTicket(ticket)
+        refreshHistory()
+      }
     } catch (error) {
-      setSubmitError(error.message || 'Query submission failed. Please try again.')
+      if (!request.cancelled) {
+        setFormError(
+          error.message || (
+            mode === 'draft'
+              ? 'Draft could not be saved. Please retry.'
+              : 'Query submission failed. Check My Tickets before trying again.'
+          ),
+        )
+      }
     } finally {
-      submitLock.current = false
-      setSubmitting(false)
+      if (mutation.current === request) {
+        mutation.current = null
+
+        if (!request.cancelled) setFormAction('')
+      }
     }
   }
 
   return (
-    <div className="fixed inset-0 flex flex-col overflow-hidden bg-slate-100 font-sans text-slate-800">
+    <div className="fixed inset-0 flex flex-col overflow-hidden bg-slate-100 text-left font-sans text-slate-800">
       <header className="shrink-0 border-b border-slate-800 bg-slate-900 px-4 py-4 text-white sm:px-6">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600" aria-hidden="true">
+            <div
+              className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600"
+              aria-hidden="true"
+            >
               <div className="h-3.5 w-3.5 rotate-45 bg-white" />
             </div>
-            <div><p className="font-bold">SmartQuery</p><p className="text-xs text-blue-300">Student Portal</p></div>
+
+            <div>
+              <p className="font-bold">SmartQuery</p>
+              <p className="text-xs text-blue-300">Student Portal</p>
+            </div>
           </div>
+
           <div className="flex items-center gap-4">
-            <span className="hidden text-sm sm:inline">{profile?.full_name || 'Student'}</span>
-            <button type="button" onClick={onLogout} className="rounded-xl bg-slate-800 px-4 py-2 text-sm hover:bg-rose-700">Sign Out</button>
+            <span className="hidden text-sm sm:inline">
+              {profile?.full_name || 'Student'}
+            </span>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              disabled={busy}
+              className="rounded-xl bg-slate-800 px-4 py-2 text-sm hover:bg-rose-700 disabled:opacity-50"
+            >
+              Sign Out
+            </button>
           </div>
         </div>
+
+        {!selectedTicket && (
+          <nav
+            aria-label="Student portal"
+            className="mx-auto mt-4 flex max-w-6xl gap-2"
+          >
+            <button
+              type="button"
+              disabled={busy}
+              aria-pressed={activeTab === 'new_query'}
+              onClick={() => setActiveTab('new_query')}
+              className={
+                'rounded-xl px-4 py-2 text-sm font-semibold disabled:opacity-50 '
+                + (activeTab === 'new_query' ? 'bg-blue-600' : 'bg-slate-800')
+              }
+            >
+              Submit Query
+            </button>
+
+            <button
+              type="button"
+              disabled={busy}
+              aria-pressed={activeTab === 'history'}
+              onClick={openHistory}
+              className={
+                'rounded-xl px-4 py-2 text-sm font-semibold disabled:opacity-50 '
+                + (activeTab === 'history' ? 'bg-blue-600' : 'bg-slate-800')
+              }
+            >
+              My Tickets
+            </button>
+          </nav>
+        )}
       </header>
 
-      {/* Mobile Tab Toggle */}
-      <div className="md:hidden bg-slate-900 border-b border-slate-800 px-4 py-2 flex justify-around text-xs font-semibold text-slate-400 shrink-0">
-        <button
-          onClick={() => setActiveTab('new_query')}
-          className={`pb-1 border-b-2 ${activeTab === 'new_query' ? 'border-blue-500 text-blue-400' : 'border-transparent'}`}
-        >
-          Submit Query
-        </button>
-        <button
-          onClick={() => setActiveTab('history')}
-          className={`pb-1 border-b-2 ${activeTab === 'history' ? 'border-blue-500 text-blue-400' : 'border-transparent'}`}
-        >
-          My Tickets ({recentTickets.length})
-        </button>
-      </div>
-
-      {/* Main Area */}
-      <main className="flex-1 p-4 md:p-6 overflow-y-auto flex items-center justify-center">
-        
-        {activeTab === 'new_query' ? (
-          <div className="w-full max-w-2xl bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden my-auto">
-            
-            <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-left">
-              <div>
-                <h1 className="text-xl sm:text-3xl font-bold text-slate-900 tracking-tight">Submit a New Query</h1>
-                <p className="text-xs sm:text-sm text-slate-500 ">Your query will be automatically classified and routed via AI to the correct department.</p>
-              </div>
-              <span className="self-start sm:self-auto inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full text-xs font-semibold border border-emerald-200 shrink-0">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                Fast Routing Active
-              </span>
+      <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+        {selectedTicket ? (
+          selectedTicket.view === 'draft' ? (
+            <StudentDraftEditor
+              key={selectedTicket.number}
+              ticketNumber={selectedTicket.number}
+              accessToken={accessToken}
+              onBack={openHistory}
+              onSubmitted={onDraftSubmitted}
+            />
+          ) : (
+            <StudentTicketDetails
+              key={selectedTicket.number}
+              ticketNumber={selectedTicket.number}
+              accessToken={accessToken}
+              onBack={openHistory}
+            />
+          )
+        ) : activeTab === 'new_query' ? (
+          <section className="mx-auto max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg">
+            <div className="border-b border-slate-200 bg-slate-50 p-6">
+              <h1 className="text-2xl font-bold text-slate-900">
+                Submit a New Query
+              </h1>
+              <p className="mt-1 text-sm text-slate-600">
+                Describe your question so it can be reviewed and routed to the appropriate team.
+              </p>
             </div>
+
             <div className="p-6">
               {submittedTicket && (
-                <div role="status" className="mb-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-                  <p className="font-semibold">Query submitted: {submittedTicket.ticket_number}</p>
-                  <p className="mt-1">Status: {STATUS_LABELS[submittedTicket.status] || submittedTicket.status}</p>
-                  <button type="button" className="mt-2 font-semibold underline" onClick={() => {
-                    setFilters(INITIAL_FILTERS)
-                    openHistory()
-                  }}>View My Tickets</button>
-                </div>
-              )}
+                <div
+                  role="status"
+                  className="mb-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900"
+                >
+                  <p className="font-semibold">
+                    Query submitted: {submittedTicket.ticket_number}
+                  </p>
+                  <p className="mt-1">
+                    Status: {STATUS_LABELS[submittedTicket.status] || submittedTicket.status}
+                  </p>
 
-              {/* Error Alert */}
-              {errorMessage && (
-                <div className="mb-5 p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs flex items-center gap-2.5">
-                  <svg className="w-4 h-4 text-rose-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                  <span>{errorMessage}</span>
-                </div>
-              )}
-
-              <form onSubmit={handleSubmit} className="space-y-4">
-                
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                      Full Name
-                    </label>
-                    <input
-                      type="text"
-                      value={profile?.full_name || 'Student'}
-                      disabled
-                      className="w-full px-3.5 py-2.5 text-xs text-slate-500 bg-slate-100 border border-slate-200 rounded-xl cursor-not-allowed font-medium select-none focus:outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                      Email Address
-                    </label>
-                    <input
-                      type="email"
-                      value={profile?.email || ''}
-                      disabled
-                      className="w-full px-3.5 py-2.5 text-xs text-slate-500 bg-slate-100 border border-slate-200 rounded-xl cursor-not-allowed font-medium select-none focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex justify-between items-center mb-1.5">
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                      Subject
-                    </label>
-                    <span className="text-[10px] font-medium text-slate-400">
-                      {subject.length}/{maxSubjectLen}
-                    </span>
-                  </div>
-                  <input
-                    type="text"
-                    value={subject}
-                    onChange={(e) => setSubject(e.target.value)}
-                    placeholder="e.g. Fee Challan Extension Request / Scholarship Verification"
-                    maxLength={maxSubjectLen}
-                    required
-                    className={`w-full px-3.5 py-2.5 text-xs text-slate-800 bg-slate-50 border rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition-all placeholder:text-slate-400 ${
-                      validationError && !subject.trim() ? 'border-rose-400' : 'border-slate-300'
-                    }`}
-                  />
-                </div>
-
-                <div>
-                  <div className="flex justify-between items-center mb-1.5">
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                      Query / Message Details
-                    </label>
-                    <span className="text-[10px] font-medium text-slate-400">
-                      {message.length}/{maxMessageLen}
-                    </span>
-                  </div>
-                  <textarea
-                    value={message}
-                    onChange={(e) => setMessage(e.target.value)}
-                    placeholder="Provide detailed context regarding your issue or inquiry..."
-                    rows={5}
-                    maxLength={maxMessageLen}
-                    required
-                    className={`w-full p-3.5 text-xs text-slate-800 bg-slate-50 border rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition-all placeholder:text-slate-400 resize-none ${
-                      validationError && !message.trim() ? 'border-rose-400' : 'border-slate-300'
-                    }`}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                    Attachment 
-                  </label>
-                  <div className="flex items-center gap-3">
-                    <label className="cursor-pointer bg-slate-100 hover:bg-slate-200 border border-slate-300 px-3.5 py-1.5 rounded-xl text-xs font-semibold text-slate-700 transition-all flex items-center gap-1.5">
-                      <svg className="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
-                      <span>Attach File</span>
-                      <input type="file" onChange={handleFileChange} accept=".pdf,.png,.jpg,.jpeg" className="hidden" />
-                    </label>
-                    <span className="text-xs text-slate-500 truncate max-w-[250px]">
-                      {attachment ? attachment.name : 'PDF, PNG, JPG (Max 5MB)'}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="pt-2 flex items-center justify-between border-t border-slate-100">
                   <button
                     type="button"
-                    onClick={handleResetForm}
-                    disabled={submitting || (!subject && !message)}
-                    className="text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                    className="mt-2 font-semibold underline"
+                    onClick={() => {
+                      setFilters(INITIAL_FILTERS)
+                      openHistory()
+                    }}
                   >
-                    Clear Fields
-                  </button>
-
-                  <button
-                    type="submit"
-                    disabled={submitting || !subject.trim() || !message.trim()}
-                    className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-semibold text-xs rounded-xl shadow-md shadow-blue-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                  >
-                    {submitting ? (
-                      <>
-                        <svg className="w-3.5 h-3.5 animate-spin text-white" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        <span>Submitting...</span>
-                      </>
-                    ) : (
-                      <span>Submit Query</span>
-                    )}
+                    View My Tickets
                   </button>
                 </div>
+              )}
 
+              {formError && (
+                <p
+                  role="alert"
+                  className="mb-5 rounded-xl bg-rose-50 p-4 text-sm text-rose-800"
+                >
+                  {formError}
+                </p>
+              )}
+
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  performFormAction('submit')
+                }}
+              >
+                <fieldset disabled={busy} className="space-y-5">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block text-sm font-semibold">
+                      Full name
+                      <input
+                        className={inputClass + ' bg-slate-100'}
+                        value={profile?.full_name || ''}
+                        disabled
+                      />
+                    </label>
+
+                    <label className="block text-sm font-semibold">
+                      Email address
+                      <input
+                        className={inputClass + ' bg-slate-100'}
+                        value={profile?.email || ''}
+                        disabled
+                      />
+                    </label>
+                  </div>
+
+                  <label className="block text-sm font-semibold">
+                    Subject
+                    <input
+                      className={inputClass}
+                      value={subject}
+                      onChange={(event) => setSubject(event.target.value)}
+                      maxLength={200}
+                      required
+                      placeholder="Briefly describe your query"
+                    />
+                    <span className="mt-1 block text-right text-xs font-normal text-slate-500">
+                      {subject.length}/200
+                    </span>
+                  </label>
+
+                  <label className="block text-sm font-semibold">
+                    Query / Message Details
+                    <textarea
+                      className={inputClass}
+                      value={message}
+                      onChange={(event) => setMessage(event.target.value)}
+                      rows={6}
+                      maxLength={5000}
+                      required
+                      placeholder="Provide the details needed to understand your query."
+                    />
+                    <span className="mt-1 block text-right text-xs font-normal text-slate-500">
+                      {message.length}/5000
+                    </span>
+                  </label>
+
+                  <p className="text-xs text-slate-500">
+                    Save Draft keeps an unfinished query for you to edit and submit later.
+                  </p>
+
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
+                    <button
+                      type="button"
+                      className={buttonClass}
+                      onClick={clearForm}
+                    >
+                      Clear Fields
+                    </button>
+
+                    <div className="flex flex-wrap gap-3">
+                      <button
+                        type="button"
+                        className={buttonClass}
+                        disabled={busy || (!subject.trim() && !message.trim())}
+                        onClick={() => performFormAction('draft')}
+                      >
+                        {formAction === 'draft' ? 'Saving...' : 'Save Draft'}
+                      </button>
+
+                      <button
+                        type="submit"
+                        className={primaryClass}
+                        disabled={busy || !subject.trim() || !message.trim()}
+                      >
+                        {formAction === 'submit' ? 'Submitting...' : 'Submit Query'}
+                      </button>
+                    </div>
+                  </div>
+                </fieldset>
               </form>
             </div>
-          </div>
+          </section>
         ) : (
-          /* Ticket History View */
-          <div className="w-full max-w-3xl bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden my-auto">
-            <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex items-center justify-between">
+          <section
+            className="mx-auto max-w-6xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg"
+            aria-busy={historyLoading}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 p-5">
               <div>
-                <h2 className="text-xlg font-bold text-slate-900">Your Ticket History</h2>
-                <p className="text-xs text-slate-500">Track and review submitted support tickets.</p>
+                <h1 className="text-2xl font-bold text-slate-900">
+                  Your Ticket History
+                </h1>
+                <p className="mt-1 text-sm text-slate-600">
+                  View saved drafts and track your web and email queries.
+                </p>
               </div>
+
               <button
-                onClick={() => setActiveTab('new_query')}
-                className="px-3 py-2.5 bg-blue-600 text-white text-xs font-semibold rounded-xl shadow-sm hover:bg-blue-700 transition-all"
+                type="button"
+                className={buttonClass}
+                onClick={refreshHistory}
+                disabled={historyLoading}
               >
-                + New Query
+                Refresh
               </button>
             </div>
 
-            <div className="p-6">
-              {loadingTickets ? (
-                <div className="text-center py-8 text-slate-400 text-xs font-medium">Loading tickets...</div>
-              ) : filteredTickets.length === 0 ? (
-                <div className="text-center py-8 text-slate-400 text-xs font-medium">No matching tickets found.</div>
-              ) : (
-                <div className="space-y-3">
-                  {filteredTickets.map((ticket, index) => (
-                    <div key={index} className="p-4 border border-slate-200 rounded-xl hover:border-slate-300 transition-all flex items-center justify-between gap-4">
-                      <div className="space-y-1">
-                        <span className="font-mono text-xs font-bold text-blue-600">{ticket.id}</span>
-                        <h3 className="text-xs font-semibold text-slate-800">{ticket.subject}</h3>
-                        <p className="text-[10px] text-slate-400">Submitted: {ticket.date}</p>
-                      </div>
+            <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-4">
+              <label className="text-sm font-semibold">
+                Search
+                <input
+                  type="search"
+                  className={inputClass}
+                  value={filters.search}
+                  maxLength={100}
+                  onChange={(event) => changeFilter('search', event.target.value)}
+                  placeholder="Ticket number or subject"
+                />
+              </label>
 
-                      <div>
-                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border ${
-                          ticket.status === 'Resolved' 
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
-                            : 'bg-amber-50 text-amber-700 border-amber-200'
-                        }`}>
-                          {ticket.status}
-                        </span>
-                      </div>
-                    </div>
-                                    ))}
-                </div>
-              )}
+              <label className="text-sm font-semibold">
+                Status
+                <select
+                  className={inputClass}
+                  value={filters.status}
+                  onChange={(event) => changeFilter('status', event.target.value)}
+                >
+                  <option value="">All statuses</option>
+                  {Object.entries(STATUS_LABELS).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="text-sm font-semibold">
+                Source
+                <select
+                  className={inputClass}
+                  value={filters.source}
+                  onChange={(event) => changeFilter('source', event.target.value)}
+                >
+                  <option value="">All sources</option>
+                  <option value="WEB">Web</option>
+                  <option value="EMAIL">Email</option>
+                </select>
+              </label>
+
+              <label className="text-sm font-semibold">
+                Per page
+                <select
+                  className={inputClass}
+                  value={filters.pageSize}
+                  onChange={(event) => changeFilter('pageSize', Number(event.target.value))}
+                >
+                  {[5, 10, 20, 50].map((size) => (
+                    <option key={size} value={size}>{size}</option>
+                  ))}
+                </select>
+              </label>
             </div>
-          </div>
+
+            <div className="px-5 pb-4">
+              <button
+                type="button"
+                className="text-sm font-semibold text-blue-700 underline"
+                onClick={() => setFilters(INITIAL_FILTERS)}
+              >
+                Clear filters
+              </button>
+            </div>
+
+            {historyLoading ? (
+              <p role="status" className="p-8 text-center text-slate-600">
+                Loading tickets...
+              </p>
+            ) : historyError ? (
+              <div
+                role="alert"
+                className="m-5 rounded-xl bg-rose-50 p-4 text-rose-800"
+              >
+                <p>{historyError}</p>
+                <button
+                  type="button"
+                  onClick={refreshHistory}
+                  className={buttonClass + ' mt-3'}
+                >
+                  Retry
+                </button>
+              </div>
+            ) : history ? (
+              <>
+                {history.items.length === 0 ? (
+                  <p role="status" className="p-8 text-center text-slate-600">
+                    No tickets match your filters.
+                  </p>
+                ) : (
+                  <ul className="space-y-3 px-5 pb-5">
+                    {history.items.map((ticket) => (
+                      <li
+                        key={ticket.ticket_id}
+                        className="flex flex-wrap items-start justify-between gap-4 rounded-xl border border-slate-200 p-4"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <button
+                            type="button"
+                            className="font-mono text-sm font-semibold text-blue-700 underline"
+                            onClick={() => openTicket(ticket)}
+                          >
+                            {ticket.ticket_number}
+                          </button>
+
+                          <h2 className="mt-1 break-words font-semibold text-slate-900">
+                            {ticket.subject || 'Untitled draft'}
+                          </h2>
+
+                          <p className="mt-1 text-xs text-slate-500">
+                            {[ticket.department_name, ticket.desk_name]
+                              .filter(Boolean)
+                              .join(' / ') || 'Not assigned yet'}
+                          </p>
+
+                          <p className="mt-2 text-xs text-slate-500">
+                            {ticket.source === 'EMAIL' ? 'Email' : 'Web'}
+                            {' | '}
+                            {ticket.submitted_at ? 'Submitted: ' : 'Created: '}
+                            {formatDate(ticket.submitted_at || ticket.created_at)}
+                          </p>
+                        </div>
+
+                        <div className="flex flex-col items-end gap-3">
+                          <span
+                            className={
+                              'rounded-full px-2.5 py-1 text-xs font-semibold '
+                              + statusClass(ticket.status)
+                            }
+                          >
+                            {STATUS_LABELS[ticket.status] || ticket.status}
+                          </span>
+
+                          <button
+                            type="button"
+                            className={buttonClass}
+                            onClick={() => openTicket(ticket)}
+                          >
+                            {ticket.status === 'DRAFT' ? 'Open Draft' : 'View Details'}
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 p-5 text-sm">
+                  <p role="status">
+                    {history.total === 0
+                      ? '0 tickets'
+                      : ((history.page - 1) * history.page_size + 1)
+                        + ' to ' + Math.min(history.page * history.page_size, history.total)
+                        + ' of ' + history.total + ' tickets'}
+                  </p>
+
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      className={buttonClass}
+                      disabled={history.page <= 1}
+                      onClick={() => setFilters((current) => ({
+                        ...current,
+                        page: history.page - 1,
+                      }))}
+                    >
+                      Previous
+                    </button>
+
+                    <span>
+                      Page {history.page} of {Math.max(1, history.total_pages)}
+                    </span>
+
+                    <button
+                      type="button"
+                      className={buttonClass}
+                      disabled={history.page >= history.total_pages}
+                      onClick={() => setFilters((current) => ({
+                        ...current,
+                        page: history.page + 1,
+                      }))}
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : null}
+          </section>
         )}
       </main>
     </div>
