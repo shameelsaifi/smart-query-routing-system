@@ -22,10 +22,15 @@ def get_student_ticket_details(
 ) -> StudentTicketDetails:
     try:
         with SessionLocal() as db:
-            actor = load_ticket_actor(db, current_user, "STUDENT")
+            actor = load_ticket_actor(
+                db,
+                current_user,
+                "STUDENT",
+            )
 
             row = db.execute(
-                text("""
+                text(
+                    """
                     WITH owned_ticket AS MATERIALIZED (
                         SELECT
                             t.ticket_id,
@@ -36,22 +41,57 @@ def get_student_ticket_details(
                             t.source,
                             t.category,
                             t.priority,
+
                             d.department_name,
                             desk.desk_name,
+
                             t.created_at,
                             t.submitted_at,
                             t.updated_at,
                             t.sla_due_at,
                             t.resolved_at,
                             t.closed_at
+
                         FROM public.tickets t
+
+                        LEFT JOIN LATERAL (
+                            SELECT
+                                assignment.department_id,
+                                assignment.desk_id
+
+                            FROM public.query_assignments assignment
+
+                            WHERE
+                                assignment.ticket_id = t.ticket_id
+                                AND assignment.is_current = TRUE
+
+                            ORDER BY
+                                assignment.assigned_at DESC,
+                                assignment.assignment_id DESC
+
+                            LIMIT 1
+                        ) qa
+                          ON TRUE
+
                         LEFT JOIN public.accounts_desks desk
-                          ON desk.desk_id = t.routed_desk_id
+                          ON desk.desk_id = COALESCE(
+                                qa.desk_id,
+                                t.routed_desk_id
+                             )
+
                         LEFT JOIN public.departments d
-                          ON d.department_id = desk.department_id
-                        WHERE t.student_id = CAST(:student_id AS UUID)
-                          AND t.ticket_number = :ticket_number
+                          ON d.department_id = COALESCE(
+                                qa.department_id,
+                                desk.department_id
+                             )
+
+                        WHERE
+                            t.student_id = CAST(
+                                :student_id AS UUID
+                            )
+                            AND t.ticket_number = :ticket_number
                     ),
+
                     events AS (
                         SELECT
                             h.history_id,
@@ -59,42 +99,64 @@ def get_student_ticket_details(
                             h.previous_status,
                             h.new_status,
                             h.changed_at
+
                         FROM public.query_status_history h
+
                         JOIN owned_ticket t
                           ON t.ticket_id = h.ticket_id
+
                         WHERE (
-                            CAST(:before_sequence AS BIGINT) IS NULL
+                            CAST(
+                                :before_sequence AS BIGINT
+                            ) IS NULL
+
                             OR h.event_sequence
-                               < CAST(:before_sequence AS BIGINT)
+                               < CAST(
+                                   :before_sequence AS BIGINT
+                                 )
                         )
-                        ORDER BY h.event_sequence DESC
+
+                        ORDER BY
+                            h.event_sequence DESC
+
                         LIMIT :event_limit
                     )
+
                     SELECT
                         to_jsonb(t) AS ticket,
+
                         COALESCE(
                             (
                                 SELECT jsonb_agg(
                                     jsonb_build_object(
                                         'history_id',
                                         e.history_id::text,
+
                                         'sequence',
                                         e.event_sequence::text,
+
                                         'previous_status',
                                         e.previous_status,
+
                                         'new_status',
                                         e.new_status,
+
                                         'changed_at',
                                         e.changed_at
                                     )
-                                    ORDER BY e.event_sequence DESC
+
+                                    ORDER BY
+                                        e.event_sequence DESC
                                 )
+
                                 FROM events e
                             ),
                             '[]'::jsonb
                         ) AS history
+
                     FROM owned_ticket t
-                """),
+                    """
+                ),
                 {
                     "student_id": actor["user_id"],
                     "ticket_number": ticket_number,
@@ -106,11 +168,16 @@ def get_student_ticket_details(
             if row is None:
                 raise HTTPException(
                     status_code=404,
-                    detail="Ticket not found or not accessible.",
+                    detail=(
+                        "Ticket not found or not accessible."
+                    ),
                 )
 
             events = row["history"]
-            visible_events = events[:HISTORY_PAGE_SIZE]
+
+            visible_events = (
+                events[:HISTORY_PAGE_SIZE]
+            )
 
             next_before = (
                 visible_events[-1]["sequence"]

@@ -1,47 +1,87 @@
 import { lazy, Suspense } from 'react'
 import { Navigate, Route, Routes } from 'react-router'
+
 import AccessDenied from '../components/common/AccessDenied'
 import PageLoader from '../components/common/PageLoader'
 import LoginPage from '../pages/auth/LoginPage'
+
 import { useAuth } from '../hooks/useAuth'
 import { getDashboardPath } from './dashboardPaths'
 
-const FeeBillingDashboard = lazy(() => import('../pages/accounts/FeeBillingDashboard'))
-const RefundsDashboard = lazy(() => import('../pages/accounts/RefundsDashboard'))
-const ScholarshipDashboard = lazy(() => import('../pages/accounts/ScholarshipDashboard'))
-const HodDashboard = lazy(() => import('../pages/hod/HodDashboard'))
-const StudentDashboard = lazy(() => import('../pages/student/StudentDashboard'))
+
+const AdminDashboard = lazy(
+  () => import('../pages/admin/AdminDashboard'),
+)
+
+const FeeBillingDashboard = lazy(
+  () => import('../pages/accounts/FeeBillingDashboard'),
+)
+
+const RefundsDashboard = lazy(
+  () => import('../pages/accounts/RefundsDashboard'),
+)
+
+const ScholarshipDashboard = lazy(
+  () => import('../pages/accounts/ScholarshipDashboard'),
+)
+
+const HodDashboard = lazy(
+  () => import('../pages/hod/HodDashboard'),
+)
+
+const StudentDashboard = lazy(
+  () => import('../pages/student/StudentDashboard'),
+)
+
+const StaffDashboard = lazy(
+  () => import('../pages/staff/StaffDashboard'),
+)
+
 
 const dashboardRoutes = [
   {
     path: '/student',
-    role: 'STUDENT',
+    roles: ['STUDENT'],
     Component: StudentDashboard,
   },
   {
     path: '/hod',
-    role: 'HOD',
+    roles: ['HOD'],
     Component: HodDashboard,
   },
   {
+    path: '/admin',
+    roles: ['ADMIN'],
+    Component: AdminDashboard,
+  },
+  {
+    path: '/staff',
+    roles: [
+      'DEPARTMENT_STAFF',
+      'INSTRUCTOR',
+    ],
+    Component: StaffDashboard,
+  },
+  {
     path: '/accounts/fee-billing',
-    role: 'DEPARTMENT_STAFF',
+    roles: ['DEPARTMENT_STAFF'],
     desk: 'FEE_BILLING',
     Component: FeeBillingDashboard,
   },
   {
     path: '/accounts/scholarship',
-    role: 'DEPARTMENT_STAFF',
+    roles: ['DEPARTMENT_STAFF'],
     desk: 'SCHOLARSHIP',
     Component: ScholarshipDashboard,
   },
   {
     path: '/accounts/refunds',
-    role: 'DEPARTMENT_STAFF',
+    roles: ['DEPARTMENT_STAFF'],
     desk: 'REFUNDS',
     Component: RefundsDashboard,
   },
 ]
+
 
 export default function AppRoutes() {
   const {
@@ -60,11 +100,15 @@ export default function AppRoutes() {
   } = useAuth()
 
   if (signingOut) {
-    return <PageLoader message="Signing out..." />
+    return (
+      <PageLoader message="Signing out..." />
+    )
   }
 
   if (authLoading) {
-    return <PageLoader message="Checking authentication..." />
+    return (
+      <PageLoader message="Checking authentication..." />
+    )
   }
 
   if (!session) {
@@ -78,21 +122,25 @@ export default function AppRoutes() {
   }
 
   if (!profile && provisioning) {
-    return <PageLoader message="Checking account access..." />
+    return (
+      <PageLoader message="Checking account access..." />
+    )
   }
 
   if (errorMessage || !profile) {
-    const title = errorKind === 'access'
-      ? 'Access Denied'
-      : errorKind === 'session'
-        ? 'Session verification failed'
-        : 'Unable to verify account'
+    const title =
+      errorKind === 'access'
+        ? 'Access Denied'
+        : errorKind === 'session'
+          ? 'Session verification failed'
+          : 'Unable to verify account'
 
     return (
       <AccessDenied
         title={title}
         message={
-          errorMessage || 'Your application profile could not be loaded.'
+          errorMessage
+          || 'Your application profile could not be loaded.'
         }
         onRetry={retryProfile}
         onLogout={handleLogout}
@@ -100,7 +148,8 @@ export default function AppRoutes() {
     )
   }
 
-  const dashboardPath = getDashboardPath(profile)
+  const dashboardPath =
+    getDashboardPath(profile)
 
   if (!dashboardPath) {
     return (
@@ -118,24 +167,58 @@ export default function AppRoutes() {
   }
 
   return (
-    <Suspense fallback={<PageLoader message="Loading dashboard..." />}>
+    <Suspense
+      fallback={
+        <PageLoader message="Loading dashboard..." />
+      }
+    >
       <Routes>
         <Route
           path="/"
-          element={<Navigate to={dashboardPath} replace />}
+          element={
+            <Navigate
+              to={dashboardPath}
+              replace
+            />
+          }
         />
 
-        {dashboardRoutes.map(({ path, role, desk, Component }) => (
-          <Route
-            key={path}
-            path={path}
-            element={
-              profile.role === role && (!desk || profile.desk_code === desk)
-                ? <Component {...dashboardProps} />
-                : <Navigate to={dashboardPath} replace />
-            }
-          />
-        ))}
+        {dashboardRoutes.map(
+          ({
+            path,
+            roles,
+            desk,
+            Component,
+          }) => {
+            const roleAllowed =
+              roles.includes(profile.role)
+
+            const deskAllowed =
+              !desk
+              || profile.desk_code === desk
+
+            return (
+              <Route
+                key={path}
+                path={path}
+                element={
+                  roleAllowed && deskAllowed
+                    ? (
+                        <Component
+                          {...dashboardProps}
+                        />
+                      )
+                    : (
+                        <Navigate
+                          to={dashboardPath}
+                          replace
+                        />
+                      )
+                }
+              />
+            )
+          },
+        )}
 
         <Route
           path="*"

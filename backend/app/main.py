@@ -1,8 +1,52 @@
+import asyncio
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_router
 from app.core.config import settings
+from app.services.sla_escalation_worker import (
+    sla_escalation_worker_loop,
+)
+from app.services.ticket_processing_worker import (
+    processing_worker_loop,
+)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    worker_tasks: list[asyncio.Task] = []
+
+    if settings.processing_worker_enabled:
+        worker_tasks.append(
+            asyncio.create_task(
+                processing_worker_loop(),
+                name="ticket-processing-worker",
+            )
+        )
+
+    if settings.sla_escalation_worker_enabled:
+        worker_tasks.append(
+            asyncio.create_task(
+                sla_escalation_worker_loop(),
+                name="sla-escalation-worker",
+            )
+        )
+
+    try:
+        yield
+
+    finally:
+        for task in worker_tasks:
+            task.cancel()
+
+        for task in worker_tasks:
+            try:
+                await task
+
+            except asyncio.CancelledError:
+                pass
 
 
 app = FastAPI(
@@ -12,6 +56,7 @@ app = FastAPI(
         "Backend API for the Smart Query Routing "
         "and Email Automation System."
     ),
+    lifespan=lifespan,
 )
 
 app.add_middleware(

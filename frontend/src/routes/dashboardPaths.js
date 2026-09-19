@@ -7,6 +7,14 @@ export function getDashboardPath(profile) {
     return '/hod'
   }
 
+  if (profile.role === 'ADMIN') {
+    return '/admin'
+  }
+
+  if (profile.role === 'INSTRUCTOR') {
+    return '/staff'
+  }
+
   if (profile.role === 'DEPARTMENT_STAFF') {
     if (profile.desk_code === 'FEE_BILLING') {
       return '/accounts/fee-billing'
@@ -19,8 +27,9 @@ export function getDashboardPath(profile) {
     if (profile.desk_code === 'REFUNDS') {
       return '/accounts/refunds'
     }
+
+    return '/staff'
   }
 
   return null
 }
-

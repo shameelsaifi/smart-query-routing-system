@@ -15,8 +15,16 @@ def get_student_tickets(
 ) -> StudentTicketPage:
     try:
         with SessionLocal() as db:
-            actor = load_ticket_actor(db, current_user, "STUDENT")
-            conditions = ["t.student_id = CAST(:student_id AS UUID)"]
+            actor = load_ticket_actor(
+                db,
+                current_user,
+                "STUDENT",
+            )
+
+            conditions = [
+                "t.student_id = CAST(:student_id AS UUID)"
+            ]
+
             parameters = {
                 "student_id": actor["user_id"],
                 "page": filters.page,
@@ -25,85 +33,211 @@ def get_student_tickets(
 
             if filters.search:
                 escaped = (
-                    filters.search.replace("!", "!!")
+                    filters.search
+                    .replace("!", "!!")
                     .replace("%", "!%")
                     .replace("_", "!_")
                 )
+
                 conditions.append(
-                    "(t.ticket_number ILIKE :search ESCAPE '!' "
-                    "OR t.subject ILIKE :search ESCAPE '!')"
+                    "("
+                    "t.ticket_number ILIKE :search ESCAPE '!' "
+                    "OR t.subject ILIKE :search ESCAPE '!'"
+                    ")"
                 )
-                parameters["search"] = "%" + escaped + "%"
+
+                parameters["search"] = (
+                    "%"
+                    + escaped
+                    + "%"
+                )
 
             if filters.status:
-                conditions.append("t.status = :status")
-                parameters["status"] = filters.status
+                conditions.append(
+                    "t.status = :status"
+                )
+
+                parameters["status"] = (
+                    filters.status
+                )
 
             if filters.source:
-                conditions.append("t.source = :source")
-                parameters["source"] = filters.source
+                conditions.append(
+                    "t.source = :source"
+                )
 
-            # One SQL statement keeps the count and page on the same snapshot.
+                parameters["source"] = (
+                    filters.source
+                )
+
+            # Current query assignment is the authoritative source
+            # for the routed department.
+            #
+            # Accounts tickets can also have a desk.
+            # Department-level routes such as Exam, Academic,
+            # Registrar and IT may legitimately have no desk.
+            #
+            # The routed_desk_id fallback keeps older desk-routed
+            # tickets compatible.
             sql = """
                 WITH matching AS MATERIALIZED (
                     SELECT
-                        t.ticket_id::text AS ticket_id,
-                        t.ticket_number, t.subject, t.status, t.source,
-                        t.category, t.priority,
-                        d.department_name, desk.desk_name,
-                        t.created_at, t.submitted_at, t.updated_at
+                        t.ticket_id::text
+                            AS ticket_id,
+
+                        t.ticket_number,
+                        t.subject,
+                        t.status,
+                        t.source,
+                        t.category,
+                        t.priority,
+
+                        d.department_name,
+                        desk.desk_name,
+
+                        t.created_at,
+                        t.submitted_at,
+                        t.updated_at
+
                     FROM public.tickets t
+
+                    LEFT JOIN LATERAL (
+                        SELECT
+                            assignment.department_id,
+                            assignment.desk_id
+
+                        FROM public.query_assignments assignment
+
+                        WHERE assignment.ticket_id = t.ticket_id
+                          AND assignment.is_current = TRUE
+
+                        ORDER BY
+                            assignment.assigned_at DESC,
+                            assignment.assignment_id DESC
+
+                        LIMIT 1
+                    ) qa
+                      ON TRUE
+
                     LEFT JOIN public.accounts_desks desk
-                      ON desk.desk_id = t.routed_desk_id
+                      ON desk.desk_id = COALESCE(
+                            qa.desk_id,
+                            t.routed_desk_id
+                         )
+
                     LEFT JOIN public.departments d
-                      ON d.department_id = desk.department_id
-                    WHERE """ + " AND ".join(conditions) + """
+                      ON d.department_id = COALESCE(
+                            qa.department_id,
+                            desk.department_id
+                         )
+
+                    WHERE
+            """ + " AND ".join(conditions) + """
                 ),
+
                 totals AS (
-                    SELECT COUNT(*) AS total FROM matching
+                    SELECT
+                        COUNT(*) AS total
+                    FROM matching
                 ),
+
                 paging AS (
                     SELECT
                         total,
+
                         GREATEST(
                             1,
-                            (total + CAST(:page_size AS INTEGER) - 1)
+                            (
+                                total
+                                + CAST(:page_size AS INTEGER)
+                                - 1
+                            )
                             / CAST(:page_size AS INTEGER)
                         ) AS total_pages
+
                     FROM totals
                 ),
+
                 bounds AS (
                     SELECT
-                        total, total_pages,
-                        LEAST(CAST(:page AS INTEGER), total_pages) AS page
+                        total,
+                        total_pages,
+
+                        LEAST(
+                            CAST(:page AS INTEGER),
+                            total_pages
+                        ) AS page
+
                     FROM paging
                 )
+
                 SELECT
-                    total, page, total_pages,
-                    COALESCE((
-                        SELECT jsonb_agg(
-                            to_jsonb(item)
-                            ORDER BY item.created_at DESC, item.ticket_number DESC
-                        )
-                        FROM (
-                            SELECT * FROM matching
-                            ORDER BY created_at DESC, ticket_number DESC
-                            LIMIT CAST(:page_size AS INTEGER)
-                            OFFSET (
-                                SELECT (page - 1) * CAST(:page_size AS INTEGER)
-                                FROM bounds
+                    total,
+                    page,
+                    total_pages,
+
+                    COALESCE(
+                        (
+                            SELECT jsonb_agg(
+                                to_jsonb(item)
+                                ORDER BY
+                                    item.created_at DESC,
+                                    item.ticket_number DESC
                             )
-                        ) AS item
-                    ), '[]'::jsonb) AS items
+
+                            FROM (
+                                SELECT *
+                                FROM matching
+
+                                ORDER BY
+                                    created_at DESC,
+                                    ticket_number DESC
+
+                                LIMIT CAST(
+                                    :page_size AS INTEGER
+                                )
+
+                                OFFSET (
+                                    SELECT
+                                        (
+                                            page - 1
+                                        )
+                                        * CAST(
+                                            :page_size
+                                            AS INTEGER
+                                        )
+
+                                    FROM bounds
+                                )
+                            ) AS item
+                        ),
+                        '[]'::jsonb
+                    ) AS items
+
                 FROM bounds
             """
-            row = db.execute(text(sql), parameters).mappings().one()
-            return StudentTicketPage.model_validate({
-                **dict(row),
-                "page_size": filters.page_size,
-            })
+
+            row = (
+                db.execute(
+                    text(sql),
+                    parameters,
+                )
+                .mappings()
+                .one()
+            )
+
+            return StudentTicketPage.model_validate(
+                {
+                    **dict(row),
+                    "page_size": filters.page_size,
+                }
+            )
 
     except SQLAlchemyError as exc:
         raise HTTPException(
-            503, "Ticket history is temporarily unavailable. Please try again."
+            503,
+            (
+                "Ticket history is temporarily unavailable. "
+                "Please try again."
+            ),
         ) from exc
