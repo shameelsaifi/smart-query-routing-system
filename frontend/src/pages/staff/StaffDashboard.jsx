@@ -1,12 +1,1476 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router'
 
-import InformationRequestWorkspace from '../../components/staff/InformationRequestWorkspace'
-import InstructorAvailabilityPanel from '../../components/staff/InstructorAvailabilityPanel'
-import TicketResponseWorkspace from '../../components/staff/TicketResponseWorkspace'
 import NotificationBell from '../../components/notifications/NotificationBell'
-
+import StaffNotificationsPage from '../../components/staff/StaffNotificationsPage'
+import InformationRequestWorkspace from '../../components/staff/InformationRequestWorkspace'
+import StaffDraftReviewPage from '../../components/staff/StaffDraftReviewPage'
+import TicketResponseWorkspace from '../../components/staff/TicketResponseWorkspace'
 import { useAssignedTickets } from '../../hooks/useAssignedTickets'
 import { cleanText } from '../../utils/text'
+
+
+const PATHS = {
+  queue: '/staff',
+  overview: '/staff/overview',
+  drafts: '/staff/drafts',
+  assignments: '/staff/assignments',
+  workload: '/staff/workload',
+  routing: '/staff/routing-monitor',
+  escalations: '/staff/escalations',
+  notifications: '/staff/notifications',
+  reports: '/staff/reports',
+  profile: '/staff/profile',
+}
+
+
+const STATUS_LABELS = {
+  ROUTED: 'Assigned',
+  IN_PROGRESS: 'In review',
+  NEEDS_INFORMATION: 'Waiting',
+  ESCALATED: 'Escalated',
+  RESOLVED: 'Resolved',
+  CLOSED: 'Closed',
+  PENDING: 'Pending',
+  CLASSIFIED: 'Classified',
+}
+
+
+const openStatus = (status) =>
+  ![
+    'RESOLVED',
+    'CLOSED',
+  ].includes(status)
+
+
+const numberOf = (ticket) =>
+  ticket?.ticket_number
+  || ticket?.ticket_code
+  || ticket?.ticket_id
+  || '—'
+
+
+function activePage(pathname) {
+  const normalized =
+    pathname.replace(
+      /\/+$/,
+      '',
+    )
+    || '/staff'
+
+  return (
+    Object.entries(
+      PATHS,
+    ).find(
+      ([
+        ,
+        value,
+      ]) =>
+        value === normalized,
+    )?.[0]
+    || 'queue'
+  )
+}
+
+
+function statusTone(status) {
+  if (
+    [
+      'RESOLVED',
+      'CLOSED',
+    ].includes(status)
+  ) {
+    return (
+      'border-emerald-100 '
+      + 'bg-emerald-50 '
+      + 'text-emerald-700'
+    )
+  }
+
+  if (
+    status === 'ESCALATED'
+  ) {
+    return (
+      'border-rose-100 '
+      + 'bg-rose-50 '
+      + 'text-rose-700'
+    )
+  }
+
+  if (
+    status
+    === 'NEEDS_INFORMATION'
+  ) {
+    return (
+      'border-violet-100 '
+      + 'bg-violet-50 '
+      + 'text-violet-700'
+    )
+  }
+
+  if (
+    status === 'IN_PROGRESS'
+  ) {
+    return (
+      'border-amber-100 '
+      + 'bg-amber-50 '
+      + 'text-amber-700'
+    )
+  }
+
+  return (
+    'border-blue-100 '
+    + 'bg-blue-50 '
+    + 'text-blue-700'
+  )
+}
+
+
+function priorityTone(priority) {
+  const value =
+    String(
+      priority || '',
+    ).toUpperCase()
+
+  if (
+    [
+      'HIGH',
+      'URGENT',
+    ].includes(value)
+  ) {
+    return (
+      'bg-rose-50 '
+      + 'text-rose-700'
+    )
+  }
+
+  if (
+    value === 'MEDIUM'
+  ) {
+    return (
+      'bg-blue-50 '
+      + 'text-blue-700'
+    )
+  }
+
+  return (
+    'bg-emerald-50 '
+    + 'text-emerald-700'
+  )
+}
+
+
+function confidence(value) {
+  if (
+    value === null
+    || value === undefined
+    || value === ''
+  ) {
+    return '—'
+  }
+
+  const numeric =
+    Number(value)
+
+  if (
+    !Number.isFinite(
+      numeric,
+    )
+  ) {
+    return '—'
+  }
+
+  return numeric <= 1
+    ? `${Math.round(
+      numeric * 100,
+    )}%`
+    : `${Math.round(
+      numeric,
+    )}%`
+}
+
+
+function sla(
+  ticket,
+  now,
+) {
+  if (!now) {
+    return {
+      main: '—',
+      sub: 'Calculating',
+      risk: false,
+    }
+  }
+
+  if (
+    !ticket?.sla_due_at
+  ) {
+    return {
+      main: 'No SLA',
+      sub: 'Unavailable',
+      risk: false,
+    }
+  }
+
+  const due =
+    new Date(
+      ticket.sla_due_at,
+    ).getTime()
+
+  if (
+    !Number.isFinite(
+      due,
+    )
+  ) {
+    return {
+      main: 'No SLA',
+      sub: 'Unavailable',
+      risk: false,
+    }
+  }
+
+  const diff =
+    due - now
+
+  const absolute =
+    Math.abs(
+      diff,
+    )
+
+  const hours =
+    Math.floor(
+      absolute
+      / 3600000,
+    )
+
+  const minutes =
+    Math.floor(
+      (
+        absolute
+        % 3600000
+      )
+      / 60000,
+    )
+
+  const duration =
+    `${hours}h ${minutes}m`
+
+  if (
+    diff < 0
+  ) {
+    return {
+      main: 'Overdue',
+      sub:
+        `${duration} overdue`,
+      risk: true,
+    }
+  }
+
+  if (
+    diff
+    <= 4 * 3600000
+  ) {
+    return {
+      main:
+        duration,
+
+      sub:
+        'SLA risk',
+
+      risk:
+        true,
+    }
+  }
+
+  return {
+    main:
+      duration,
+
+    sub:
+      'remaining',
+
+    risk:
+      false,
+  }
+}
+
+
+function age(
+  ticket,
+  now,
+) {
+  if (!now) {
+    return '—'
+  }
+
+  const created =
+    new Date(
+      ticket?.submitted_at
+      || ticket?.created_at
+      || '',
+    ).getTime()
+
+  if (
+    !Number.isFinite(
+      created,
+    )
+  ) {
+    return '—'
+  }
+
+  const minutes =
+    Math.max(
+      0,
+
+      Math.floor(
+        (
+          now
+          - created
+        )
+        / 60000,
+      ),
+    )
+
+  return (
+    `${Math.floor(
+      minutes / 60,
+    )}h ${minutes % 60}m`
+  )
+}
+
+
+function Icon({
+  name,
+  className = 'h-5 w-5',
+}) {
+  const common = {
+    className,
+    fill: 'none',
+    stroke: 'currentColor',
+    viewBox: '0 0 24 24',
+    strokeWidth: '1.8',
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+    'aria-hidden': true,
+  }
+
+  if (
+    name === 'home'
+  ) {
+    return (
+      <svg {...common}>
+        <path d="m3 11 9-8 9 8" />
+        <path d="M5 10v10h14V10" />
+      </svg>
+    )
+  }
+
+  if (
+    name === 'draft'
+  ) {
+    return (
+      <svg {...common}>
+        <path d="M7 3h7l4 4v14H7z" />
+        <path d="M14 3v5h5M10 12h5M10 16h5" />
+      </svg>
+    )
+  }
+
+  if (
+    name === 'assignment'
+  ) {
+    return (
+      <svg {...common}>
+        <rect
+          x="5"
+          y="3"
+          width="14"
+          height="18"
+          rx="2"
+        />
+
+        <path d="M9 7h6m-6 5h6m-6 5h4" />
+      </svg>
+    )
+  }
+
+  if (
+    name === 'workload'
+  ) {
+    return (
+      <svg {...common}>
+        <path d="M5 20V10M10 20V4M15 20v-7M20 20V7" />
+      </svg>
+    )
+  }
+
+  if (
+    name === 'routing'
+  ) {
+    return (
+      <svg {...common}>
+        <circle
+          cx="5"
+          cy="6"
+          r="2"
+        />
+
+        <circle
+          cx="19"
+          cy="6"
+          r="2"
+        />
+
+        <circle
+          cx="12"
+          cy="18"
+          r="2"
+        />
+
+        <path d="M7 6h10M6.5 8l4.4 8M17.5 8l-4.4 8" />
+      </svg>
+    )
+  }
+
+  if (
+    name === 'alert'
+  ) {
+    return (
+      <svg {...common}>
+        <path d="M12 3 2.5 20h19Z" />
+        <path d="M12 9v4M12 17h.01" />
+      </svg>
+    )
+  }
+
+  if (
+    name === 'bell'
+  ) {
+    return (
+      <svg {...common}>
+        <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+        <path d="M10 21h4" />
+      </svg>
+    )
+  }
+
+  if (
+    name === 'report'
+  ) {
+    return (
+      <svg {...common}>
+        <path d="M7 3h10v18H7z" />
+        <path d="M10 8h4M10 12h4M10 16h4" />
+      </svg>
+    )
+  }
+
+  if (
+    name === 'user'
+  ) {
+    return (
+      <svg {...common}>
+        <circle
+          cx="12"
+          cy="8"
+          r="4"
+        />
+
+        <path d="M4 21a8 8 0 0 1 16 0" />
+      </svg>
+    )
+  }
+
+  if (
+    name === 'search'
+  ) {
+    return (
+      <svg {...common}>
+        <circle
+          cx="11"
+          cy="11"
+          r="7"
+        />
+
+        <path d="m20 20-4-4" />
+      </svg>
+    )
+  }
+
+  if (
+    name === 'refresh'
+  ) {
+    return (
+      <svg {...common}>
+        <path d="M20 6v5h-5M4 18v-5h5" />
+
+        <path d="M18.5 9A7 7 0 0 0 6 6.5L4 9M5.5 15A7 7 0 0 0 18 17.5l2-2.5" />
+      </svg>
+    )
+  }
+
+  if (
+    name === 'clock'
+  ) {
+    return (
+      <svg {...common}>
+        <circle
+          cx="12"
+          cy="12"
+          r="9"
+        />
+
+        <path d="M12 7v5l3 2" />
+      </svg>
+    )
+  }
+
+  return (
+    <svg {...common}>
+      <rect
+        x="4"
+        y="3"
+        width="16"
+        height="18"
+        rx="2"
+      />
+
+      <path d="M8 8h8M8 12h8M8 16h5" />
+    </svg>
+  )
+}
+
+
+function Brand() {
+  return (
+    <div className="flex items-center gap-3 px-2">
+
+      <div className="relative h-10 w-10 rounded-xl bg-gradient-to-br from-blue-400 to-blue-700 shadow-lg shadow-blue-950/20">
+
+        <span className="absolute left-[8px] top-[8px] h-3 w-3 rounded-full bg-white" />
+
+        <span className="absolute bottom-[8px] right-[7px] h-2.5 w-2.5 rounded-full bg-white/90" />
+
+      </div>
+
+      <span className="text-[18px] font-bold tracking-tight text-white">
+        SmartQuery
+      </span>
+
+    </div>
+  )
+}
+
+
+function NavButton({
+  icon,
+  label,
+  active,
+  badge,
+  note,
+  onClick,
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={
+        'flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-left text-[12px] font-medium transition '
+        + (
+          active
+            ? (
+              'bg-blue-600 text-white '
+              + 'shadow-[0_10px_22px_-14px_rgba(37,99,235,0.95)]'
+            )
+            : (
+              'text-slate-300 '
+              + 'hover:bg-white/[0.06] '
+              + 'hover:text-white'
+            )
+        )
+      }
+    >
+
+      <Icon
+        name={icon}
+        className="h-[18px] w-[18px] shrink-0"
+      />
+
+      <span className="min-w-0 flex-1 truncate">
+        {label}
+      </span>
+
+
+      {note && (
+        <span className="rounded-full bg-blue-900/70 px-2 py-0.5 text-[8px] font-bold text-blue-200">
+          {note}
+        </span>
+      )}
+
+
+      {Number(badge) > 0 && (
+        <span className="min-w-5 rounded-full bg-white/15 px-1.5 py-0.5 text-center text-[9px] font-bold">
+          {
+            badge > 99
+              ? '99+'
+              : badge
+          }
+        </span>
+      )}
+
+    </button>
+  )
+}
+
+
+function Stat({
+  icon,
+  label,
+  value,
+  note,
+  tone,
+}) {
+  const toneClass = {
+    blue:
+      'bg-blue-50 text-blue-600',
+
+    violet:
+      'bg-violet-50 text-violet-600',
+
+    rose:
+      'bg-rose-50 text-rose-600',
+
+    amber:
+      'bg-amber-50 text-amber-600',
+  }[tone]
+
+  return (
+    <div className="flex min-h-[102px] items-center gap-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_10px_28px_-24px_rgba(15,23,42,0.35)]">
+
+      <div
+        className={
+          `flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${toneClass}`
+        }
+      >
+        <Icon
+          name={icon}
+          className="h-6 w-6"
+        />
+      </div>
+
+
+      <div className="min-w-0">
+
+        <p className="text-[8px] font-bold uppercase tracking-[0.09em] text-slate-400">
+          {label}
+        </p>
+
+        <p className="mt-1 text-2xl font-bold text-slate-900">
+          {value}
+        </p>
+
+        <p className="mt-0.5 truncate text-[9px] text-slate-500">
+          {note}
+        </p>
+
+      </div>
+
+    </div>
+  )
+}
+
+
+function Heading({
+  eyebrow,
+  title,
+  subtitle,
+  action,
+}) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-4">
+
+      <div>
+
+        <p className="text-[8px] font-bold uppercase tracking-[0.12em] text-slate-500">
+          {eyebrow}
+        </p>
+
+        <h1 className="mt-1 text-3xl font-bold tracking-[-0.035em] text-slate-900">
+          {title}
+        </h1>
+
+        <p className="mt-1 text-[11px] text-slate-500">
+          {subtitle}
+        </p>
+
+      </div>
+
+      {action}
+
+    </div>
+  )
+}
+
+
+function QueueTable({
+  items,
+  profile,
+  now,
+  onOpen,
+}) {
+  return (
+    <div className="w-full min-w-0 overflow-x-auto">
+
+      <table className="min-w-[1120px] w-full table-fixed text-left">
+
+        <thead>
+
+          <tr className="bg-slate-50 text-[8px] font-bold uppercase tracking-[0.08em] text-slate-400">
+
+            <th className="px-3 py-3">
+              Query
+            </th>
+
+            <th className="px-3 py-3">
+              Student / Subject
+            </th>
+
+            <th className="px-3 py-3">
+              Source
+            </th>
+
+            <th className="px-3 py-3">
+              Category
+            </th>
+
+            <th className="px-3 py-3">
+              Priority
+            </th>
+
+            <th className="px-3 py-3">
+              Status
+            </th>
+
+            <th className="px-3 py-3">
+              Age / SLA
+            </th>
+
+            <th className="px-3 py-3">
+              Assigned To
+            </th>
+
+            <th className="px-3 py-3">
+              AI Draft
+            </th>
+
+            <th className="px-3 py-3">
+              Action
+            </th>
+
+          </tr>
+
+        </thead>
+
+
+        <tbody>
+
+          {
+            items.length === 0
+              ? (
+                <tr>
+
+                  <td
+                    colSpan="10"
+                    className="px-4 py-12 text-center text-xs text-slate-500"
+                  >
+                    No queries match this view.
+                  </td>
+
+                </tr>
+              )
+
+              : items.map(
+                (ticket) => {
+                  const info =
+                    sla(
+                      ticket,
+                      now,
+                    )
+
+                  const hasDraft =
+                    Boolean(
+                      ticket.ai_draft_reply
+                      || ticket.ai_draft_text,
+                    )
+
+                  return (
+                    <tr
+                      key={
+                        ticket.ticket_id
+                        || numberOf(
+                          ticket,
+                        )
+                      }
+                      className="border-b border-slate-100 text-[9px] last:border-b-0"
+                    >
+
+                      <td className="px-3 py-3.5 font-mono font-bold text-slate-800">
+                        {
+                          numberOf(
+                            ticket,
+                          )
+                        }
+                      </td>
+
+
+                      <td className="px-3 py-3.5">
+
+                        <p className="truncate font-semibold text-slate-800">
+                          {
+                            cleanText(
+                              ticket.student_name
+                              || 'Student',
+                            )
+                          }
+                        </p>
+
+                        <p className="mt-0.5 truncate text-slate-500">
+                          {
+                            cleanText(
+                              ticket.subject
+                              || 'Untitled query',
+                            )
+                          }
+                        </p>
+
+                      </td>
+
+
+                      <td className="px-3 py-3.5">
+
+                        <span
+                          className={
+                            'rounded-full px-2 py-1 text-[7px] font-bold '
+                            + (
+                              ticket.source
+                                === 'EMAIL'
+                                ? (
+                                  'bg-violet-50 '
+                                  + 'text-violet-700'
+                                )
+                                : (
+                                  'bg-blue-50 '
+                                  + 'text-blue-700'
+                                )
+                            )
+                          }
+                        >
+                          {
+                            ticket.source
+                              === 'EMAIL'
+                              ? 'GMAIL'
+                              : cleanText(
+                                ticket.source
+                                || 'WEB',
+                              )
+                          }
+                        </span>
+
+                      </td>
+
+
+                      <td className="truncate px-3 py-3.5 text-slate-600">
+                        {
+                          cleanText(
+                            ticket.category
+                            || 'Uncategorized',
+                          )
+                        }
+                      </td>
+
+
+                      <td className="px-3 py-3.5">
+
+                        <span
+                          className={
+                            'rounded-full px-2 py-1 text-[7px] font-bold '
+                            + priorityTone(
+                              ticket.priority,
+                            )
+                          }
+                        >
+                          {
+                            cleanText(
+                              ticket.priority
+                              || 'LOW',
+                            )
+                          }
+                        </span>
+
+                      </td>
+
+
+                      <td className="px-3 py-3.5">
+
+                        <span
+                          className={
+                            'rounded-full border px-2 py-1 text-[7px] font-bold '
+                            + statusTone(
+                              ticket.status,
+                            )
+                          }
+                        >
+                          {
+                            STATUS_LABELS[
+                            ticket.status
+                            ]
+                            || cleanText(
+                              ticket.status,
+                            )
+                          }
+                        </span>
+
+                      </td>
+
+
+                      <td className="px-3 py-3.5">
+
+                        <p className="font-semibold text-slate-700">
+                          {
+                            age(
+                              ticket,
+                              now,
+                            )
+                          }
+                        </p>
+
+                        <p
+                          className={
+                            'mt-0.5 '
+                            + (
+                              info.risk
+                                ? (
+                                  'font-semibold '
+                                  + 'text-rose-600'
+                                )
+                                : 'text-slate-500'
+                            )
+                          }
+                        >
+                          {
+                            info.sub
+                              === 'remaining'
+                              ? (
+                                `${info.main} remaining`
+                              )
+                              : info.sub
+                          }
+                        </p>
+
+                      </td>
+
+
+                      <td className="truncate px-3 py-3.5 text-slate-600">
+                        {
+                          cleanText(
+                            ticket.assigned_user_name
+                            || ticket.assignee_name
+                            || profile?.full_name
+                            || 'Assigned staff',
+                          )
+                        }
+                      </td>
+
+
+                      <td className="px-3 py-3.5">
+
+                        <span
+                          className={
+                            'rounded-full px-2 py-1 text-[7px] font-bold '
+                            + (
+                              hasDraft
+                                ? (
+                                  'bg-violet-50 '
+                                  + 'text-violet-700'
+                                )
+                                : (
+                                  'bg-slate-100 '
+                                  + 'text-slate-500'
+                                )
+                            )
+                          }
+                        >
+                          {
+                            hasDraft
+                              ? 'DRAFT READY'
+                              : 'PENDING'
+                          }
+                        </span>
+
+                      </td>
+
+
+                      <td className="px-3 py-3.5">
+
+                        <button
+                          type="button"
+                          onClick={
+                            () =>
+                              onOpen(
+                                ticket,
+                              )
+                          }
+                          className="font-semibold text-blue-600 hover:text-blue-800"
+                        >
+                          {
+                            hasDraft
+                              && [
+                                'IN_PROGRESS',
+                                'ESCALATED',
+                              ].includes(
+                                ticket.status,
+                              )
+                              ? 'Review →'
+                              : 'Open →'
+                          }
+                        </button>
+
+                      </td>
+
+                    </tr>
+                  )
+                },
+              )
+          }
+
+        </tbody>
+
+      </table>
+
+    </div>
+  )
+}
+
+
+function TicketPanel({
+  ticket,
+  profile,
+  accessToken,
+  startingTicket,
+  responseTicket,
+  infoTicket,
+  setResponseTicket,
+  setInfoTicket,
+  handleStartWork,
+  onInformationRequested,
+  onClose,
+}) {
+  if (!ticket) {
+    return null
+  }
+
+  const number =
+    numberOf(
+      ticket,
+    )
+
+  const responseAllowed =
+    [
+      'IN_PROGRESS',
+      'ESCALATED',
+    ].includes(
+      ticket.status,
+    )
+
+  const responseOpen =
+    responseTicket
+    === number
+
+  const infoOpen =
+    infoTicket
+    === number
+
+
+  return (
+    <section className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+
+      <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-5 py-4">
+
+        <div>
+
+          <p className="text-[8px] font-bold uppercase tracking-[0.09em] text-slate-400">
+            Query review
+          </p>
+
+          <h2 className="mt-1 text-[17px] font-bold text-slate-900">
+            {number}
+          </h2>
+
+        </div>
+
+
+        <button
+          type="button"
+          onClick={
+            onClose
+          }
+          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[9px] font-semibold text-slate-600"
+        >
+          Close
+        </button>
+
+      </div>
+
+
+      <div className="grid gap-4 p-5 xl:grid-cols-[1.2fr_0.8fr]">
+
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+
+          <div className="flex flex-wrap gap-2">
+
+            <span
+              className={
+                'rounded-full border px-2.5 py-1 text-[8px] font-bold '
+                + statusTone(
+                  ticket.status,
+                )
+              }
+            >
+              {
+                STATUS_LABELS[
+                ticket.status
+                ]
+                || ticket.status
+              }
+            </span>
+
+            <span
+              className={
+                'rounded-full px-2.5 py-1 text-[8px] font-bold '
+                + priorityTone(
+                  ticket.priority,
+                )
+              }
+            >
+              {
+                cleanText(
+                  ticket.priority
+                  || 'LOW',
+                )
+              }
+            </span>
+
+          </div>
+
+
+          <p className="mt-4 text-[8px] font-bold uppercase text-slate-400">
+            Student
+          </p>
+
+          <p className="mt-1 text-[10px] font-semibold text-slate-800">
+            {
+              cleanText(
+                ticket.student_name
+                || 'Student',
+              )
+            }
+          </p>
+
+
+          <p className="mt-4 text-[8px] font-bold uppercase text-slate-400">
+            Subject
+          </p>
+
+          <p className="mt-1 text-[13px] font-semibold text-slate-900">
+            {
+              cleanText(
+                ticket.subject
+                || 'Untitled query',
+              )
+            }
+          </p>
+
+
+          <p className="mt-4 text-[8px] font-bold uppercase text-slate-400">
+            Message
+          </p>
+
+          <p className="mt-1 whitespace-pre-wrap text-[10px] leading-5 text-slate-600">
+            {
+              cleanText(
+                ticket.message
+                || 'No message available.',
+              )
+            }
+          </p>
+
+        </div>
+
+
+        <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-4">
+
+          <div className="flex items-start justify-between gap-3">
+
+            <div>
+
+              <p className="text-[8px] font-bold uppercase text-blue-600">
+                AI analysis
+              </p>
+
+              <p className="mt-1 text-[9px] text-slate-500">
+                Human review is mandatory.
+              </p>
+
+            </div>
+
+
+            <span className="rounded-full bg-white px-2.5 py-1 text-[8px] font-bold text-blue-700">
+              {
+                confidence(
+                  ticket.confidence,
+                )
+              }
+            </span>
+
+          </div>
+
+
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+
+            <div className="rounded-xl bg-white p-3">
+
+              <p className="text-[8px] text-slate-400">
+                Category
+              </p>
+
+              <p className="mt-1 text-[10px] font-semibold">
+                {
+                  cleanText(
+                    ticket.category
+                    || 'Uncategorized',
+                  )
+                }
+              </p>
+
+            </div>
+
+
+            <div className="rounded-xl bg-white p-3">
+
+              <p className="text-[8px] text-slate-400">
+                Assigned to
+              </p>
+
+              <p className="mt-1 truncate text-[10px] font-semibold">
+                {
+                  cleanText(
+                    ticket.assigned_user_name
+                    || ticket.assignee_name
+                    || profile?.full_name
+                    || 'Assigned staff',
+                  )
+                }
+              </p>
+
+            </div>
+
+          </div>
+
+
+          <div className="mt-2 rounded-xl bg-white p-3">
+
+            <p className="text-[8px] text-slate-400">
+              Intent
+            </p>
+
+            <p className="mt-1 text-[10px] leading-5">
+              {
+                cleanText(
+                  ticket.ai_intent
+                  || 'Not available',
+                )
+              }
+            </p>
+
+          </div>
+
+
+          <div className="mt-2 rounded-xl bg-white p-3">
+
+            <p className="text-[8px] text-slate-400">
+              Summary
+            </p>
+
+            <p className="mt-1 text-[10px] leading-5">
+              {
+                cleanText(
+                  ticket.ai_summary
+                  || 'Not available',
+                )
+              }
+            </p>
+
+          </div>
+
+
+          <div className="mt-4 space-y-2">
+
+            {ticket.status === 'ROUTED' && (
+              <button
+                type="button"
+                onClick={
+                  () =>
+                    handleStartWork(
+                      number,
+                    )
+                }
+                disabled={
+                  startingTicket
+                  === number
+                }
+                className="w-full rounded-xl bg-blue-600 px-4 py-2.5 text-[10px] font-semibold text-white disabled:opacity-50"
+              >
+                {
+                  startingTicket
+                    === number
+                    ? 'Starting...'
+                    : 'Start Work'
+                }
+              </button>
+            )}
+
+
+            {responseAllowed && (
+              <>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInfoTicket(
+                      null,
+                    )
+
+                    setResponseTicket(
+                      responseOpen
+                        ? null
+                        : number,
+                    )
+                  }}
+                  className="w-full rounded-xl bg-slate-900 px-4 py-2.5 text-[10px] font-semibold text-white"
+                >
+                  {
+                    responseOpen
+                      ? 'Hide Response Workspace'
+                      : 'Review Final Response'
+                  }
+                </button>
+
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setResponseTicket(
+                      null,
+                    )
+
+                    setInfoTicket(
+                      infoOpen
+                        ? null
+                        : number,
+                    )
+                  }}
+                  className="w-full rounded-xl bg-amber-500 px-4 py-2.5 text-[10px] font-semibold text-white"
+                >
+                  {
+                    infoOpen
+                      ? 'Cancel Information Request'
+                      : 'Request More Information'
+                  }
+                </button>
+
+              </>
+            )}
+
+
+            {
+              ticket.status
+              === 'NEEDS_INFORMATION'
+              && (
+                <div className="rounded-xl border border-violet-200 bg-violet-50 p-3 text-[10px] text-violet-800">
+                  Waiting for additional student information.
+                </div>
+              )
+            }
+
+
+            {
+              [
+                'RESOLVED',
+                'CLOSED',
+              ].includes(
+                ticket.status,
+              )
+              && (
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-center text-[10px] font-semibold text-emerald-800">
+                  Ticket completed
+                </div>
+              )
+            }
+
+          </div>
+
+        </div>
+
+      </div>
+
+
+      {responseOpen && (
+        <div className="px-5 pb-5">
+
+          <TicketResponseWorkspace
+            accessToken={
+              accessToken
+            }
+            ticketNumber={
+              number
+            }
+            onClose={() =>
+              setResponseTicket(
+                null,
+              )
+            }
+          />
+
+        </div>
+      )}
+
+
+      {infoOpen && (
+        <div className="px-5 pb-5">
+
+          <InformationRequestWorkspace
+            accessToken={
+              accessToken
+            }
+            ticketNumber={
+              number
+            }
+            onClose={() =>
+              setInfoTicket(
+                null,
+              )
+            }
+            onRequested={
+              onInformationRequested
+            }
+          />
+
+        </div>
+      )}
+
+    </section>
+  )
+}
 
 
 function StaffDashboard({
@@ -14,6 +1478,17 @@ function StaffDashboard({
   accessToken,
   onLogout,
 }) {
+  const location =
+    useLocation()
+
+  const navigate =
+    useNavigate()
+
+  const page =
+    activePage(
+      location.pathname,
+    )
+
   const {
     tickets,
     loading,
@@ -28,86 +1503,337 @@ function StaffDashboard({
     accessToken,
   )
 
-  const [
-    responseTicketNumber,
-    setResponseTicketNumber,
-  ] = useState(null)
 
   const [
-    informationTicketNumber,
-    setInformationTicketNumber,
-  ] = useState(null)
-
-  const [
-    localSuccessMessage,
-    setLocalSuccessMessage,
+    search,
+    setSearch,
   ] = useState('')
 
+  const [
+    source,
+    setSource,
+  ] = useState('ALL')
 
-  const getStatusBadge = (
+  const [
+    priority,
+    setPriority,
+  ] = useState('ALL')
+
+  const [
     status,
-  ) => {
-    switch (status) {
-      case 'ROUTED':
-        return (
-          'bg-blue-100 text-blue-800 '
-          + 'border-blue-200'
-        )
+    setStatus,
+  ] = useState('OPEN')
 
-      case 'IN_PROGRESS':
-        return (
-          'bg-amber-100 text-amber-800 '
-          + 'border-amber-200'
-        )
+  const [
+    slaOnly,
+    setSlaOnly,
+  ] = useState(false)
 
-      case 'NEEDS_INFORMATION':
-        return (
-          'bg-purple-100 text-purple-800 '
-          + 'border-purple-200'
-        )
+  const [
+    selected,
+    setSelected,
+  ] = useState(null)
 
-      case 'ESCALATED':
-        return (
-          'bg-red-100 text-red-800 '
-          + 'border-red-200'
-        )
+  const [
+    responseTicket,
+    setResponseTicket,
+  ] = useState(null)
 
-      case 'RESOLVED':
-        return (
-          'bg-emerald-100 text-emerald-800 '
-          + 'border-emerald-200'
-        )
+  const [
+    infoTicket,
+    setInfoTicket,
+  ] = useState(null)
 
-      default:
-        return (
-          'bg-slate-100 text-slate-800 '
-          + 'border-slate-200'
+  const [
+    localMessage,
+    setLocalMessage,
+  ] = useState('')
+
+  const [
+    now,
+    setNow,
+  ] = useState(null)
+
+
+  useEffect(() => {
+    const normalized =
+      location.pathname
+        .replace(
+          /\/+$/,
+          '',
         )
+      || '/staff'
+
+    if (
+      !Object.values(
+        PATHS,
+      ).includes(
+        normalized,
+      )
+    ) {
+      navigate(
+        '/staff',
+        {
+          replace: true,
+        },
+      )
     }
-  }
+  }, [
+    location.pathname,
+    navigate,
+  ])
 
 
-  const roleLabel =
-    profile?.role === 'INSTRUCTOR'
-      ? 'Instructor'
-      : 'Department Staff'
+  useEffect(() => {
+    const update = () =>
+      setNow(
+        Date.now(),
+      )
 
-  const departmentLabel =
+    const first =
+      window.setTimeout(
+        update,
+        0,
+      )
+
+    const timer =
+      window.setInterval(
+        update,
+        60000,
+      )
+
+    return () => {
+      window.clearTimeout(
+        first,
+      )
+
+      window.clearInterval(
+        timer,
+      )
+    }
+  }, [])
+
+
+  const department =
     profile?.department_name
     || 'Department'
 
 
-  const handleInformationRequested =
+  const initials =
+    (
+      profile?.full_name
+      || profile?.email
+      || 'DS'
+    )
+      .split(
+        /[\s@._-]+/,
+      )
+      .filter(Boolean)
+      .slice(0, 2)
+      .map(
+        (part) =>
+          part[0]
+            ?.toUpperCase(),
+      )
+      .join('')
+
+
+  const openTickets =
+    tickets.filter(
+      (ticket) =>
+        openStatus(
+          ticket.status,
+        ),
+    )
+
+
+  const drafts =
+    tickets.filter(
+      (ticket) =>
+        Boolean(
+          ticket.ai_draft_reply
+          || ticket.ai_draft_text,
+        ),
+    )
+
+
+  const escalations =
+    tickets.filter(
+      (ticket) =>
+        ticket.status
+        === 'ESCALATED',
+    )
+
+
+  const needsInfo =
+    tickets.filter(
+      (ticket) =>
+        ticket.status
+        === 'NEEDS_INFORMATION',
+    )
+
+
+  const urgent =
+    openTickets.filter(
+      (ticket) =>
+        [
+          'HIGH',
+          'URGENT',
+        ].includes(
+          String(
+            ticket.priority
+            || '',
+          ).toUpperCase(),
+        ),
+    )
+
+
+  const slaRisk =
+    openTickets.filter(
+      (ticket) =>
+        sla(
+          ticket,
+          now,
+        ).risk,
+    )
+
+
+  const selectedTicket =
+    tickets.find(
+      (ticket) =>
+        numberOf(
+          ticket,
+        )
+        === selected,
+    )
+    || null
+
+
+  const filtered =
+    tickets.filter(
+      (ticket) => {
+        const haystack =
+          [
+            numberOf(
+              ticket,
+            ),
+
+            ticket.student_name,
+
+            ticket.subject,
+
+            ticket.category,
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase()
+
+        return (
+          (
+            !search.trim()
+            || haystack.includes(
+              search
+                .trim()
+                .toLowerCase(),
+            )
+          )
+
+          && (
+            source === 'ALL'
+            || ticket.source
+            === source
+          )
+
+          && (
+            priority === 'ALL'
+            || String(
+              ticket.priority
+              || '',
+            ).toUpperCase()
+            === priority
+          )
+
+          && (
+            status === 'ALL'
+            || (
+              status === 'OPEN'
+              && openStatus(
+                ticket.status,
+              )
+            )
+            || ticket.status
+            === status
+          )
+
+          && (
+            !slaOnly
+            || sla(
+              ticket,
+              now,
+            ).risk
+          )
+        )
+      },
+    )
+
+
+  const go = (
+    target,
+  ) => {
+    setSelected(
+      null,
+    )
+
+    setResponseTicket(
+      null,
+    )
+
+    setInfoTicket(
+      null,
+    )
+
+    setLocalMessage(
+      '',
+    )
+
+    navigate(
+      PATHS[
+      target
+      ],
+    )
+  }
+
+
+  const openTicket = (
+    ticket,
+  ) => {
+    setSelected(
+      numberOf(
+        ticket,
+      ),
+    )
+
+    setResponseTicket(
+      null,
+    )
+
+    setInfoTicket(
+      null,
+    )
+  }
+
+
+  const informationRequested =
     async (result) => {
-      setInformationTicketNumber(
+      setInfoTicket(
         null,
       )
 
-      setResponseTicketNumber(
+      setResponseTicket(
         null,
       )
 
-      setLocalSuccessMessage(
+      setLocalMessage(
         `Information requested successfully for ${result.ticket_number}.`,
       )
 
@@ -115,757 +1841,1847 @@ function StaffDashboard({
     }
 
 
-  const handleResolve = async (
-    ticketNumber,
-  ) => {
-    const confirmed =
-      window.confirm(
-        `Mark ${ticketNumber} as resolved? `
-        + 'An approved final response must already '
-        + 'have been delivered to the student.',
+  const reset = () => {
+    setSearch('')
+    setSource('ALL')
+    setPriority('ALL')
+    setStatus('OPEN')
+    setSlaOnly(false)
+  }
+
+
+  const exportCsv = () => {
+    const quote = (
+      value,
+    ) =>
+      `"${String(
+        value ?? '',
+      ).replace(
+        /"/g,
+        '""',
+      )}"`
+
+
+    const rows = [
+      [
+        'Query',
+        'Student',
+        'Subject',
+        'Source',
+        'Category',
+        'Priority',
+        'Status',
+        'SLA Due',
+      ],
+
+      ...filtered.map(
+        (ticket) => [
+          numberOf(
+            ticket,
+          ),
+
+          ticket.student_name,
+
+          ticket.subject,
+
+          ticket.source,
+
+          ticket.category,
+
+          ticket.priority,
+
+          ticket.status,
+
+          ticket.sla_due_at,
+        ],
+      ),
+    ]
+
+
+    const blob =
+      new Blob(
+        [
+          rows
+            .map(
+              (row) =>
+                row
+                  .map(
+                    quote,
+                  )
+                  .join(','),
+            )
+            .join('\n'),
+        ],
+
+        {
+          type:
+            'text/csv;charset=utf-8',
+        },
       )
 
-    if (!confirmed) {
-      return
-    }
 
-    setResponseTicketNumber(
-      null,
+    const url =
+      URL.createObjectURL(
+        blob,
+      )
+
+
+    const anchor =
+      document.createElement(
+        'a',
+      )
+
+    anchor.href =
+      url
+
+    anchor.download =
+      (
+        'staff-query-queue-'
+        + `${new Date()
+          .toISOString()
+          .slice(
+            0,
+            10,
+          )}.csv`
+      )
+
+    document.body.appendChild(
+      anchor,
     )
 
-    setInformationTicketNumber(
-      null,
-    )
+    anchor.click()
 
-    setLocalSuccessMessage('')
+    anchor.remove()
 
-    await handleResolveTicket(
-      ticketNumber,
+    URL.revokeObjectURL(
+      url,
     )
   }
 
 
-  return (
-    <div className="fixed inset-0 bg-slate-100 flex flex-col font-sans overflow-hidden">
+  const stats = (
+    <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
 
-      {/* HEADER */}
+      <Stat
+        icon="queue"
+        label="Open Queries"
+        value={
+          loading
+            ? '—'
+            : openTickets.length
+        }
+        note="Assigned active queue"
+        tone="blue"
+      />
 
-      <header className="bg-slate-900 text-white px-6 py-3.5 flex justify-between items-center shadow-md shrink-0 z-10">
+      <Stat
+        icon="draft"
+        label="Drafts Ready"
+        value={
+          loading
+            ? '—'
+            : drafts.length
+        }
+        note="AI suggestions available"
+        tone="violet"
+      />
 
-        <div className="flex items-center gap-3">
+      <Stat
+        icon="alert"
+        label="High / Urgent"
+        value={
+          loading
+            ? '—'
+            : urgent.length
+        }
+        note="Review first"
+        tone="rose"
+      />
 
-          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shadow-sm">
-            <div className="w-3.5 h-3.5 bg-white rounded-xs rotate-45" />
-          </div>
+      <Stat
+        icon="clock"
+        label="SLA Risk"
+        value={
+          loading
+            ? '—'
+            : slaRisk.length
+        }
+        note="Due soon or overdue"
+        tone="amber"
+      />
 
-
-          <div>
-
-            <span className="font-bold text-lg tracking-wide block leading-none">
-              SmartQuery
-            </span>
-
-            <span className="text-[10px] text-blue-400 font-medium">
-              {departmentLabel}
-              {' • '}
-              {roleLabel}
-            </span>
-
-          </div>
-
-        </div>
-
-
-        <div className="flex items-center gap-4">
-
-          <div className="text-right hidden sm:block">
-
-            <div className="text-xs font-semibold text-slate-200">
-              {profile?.full_name
-                || roleLabel}
-            </div>
-
-            <div className="text-[9px] text-slate-400 mt-0.5">
-              {departmentLabel}
-            </div>
-
-          </div>
+    </div>
+  )
 
 
-          <NotificationBell
-            accessToken={
-              accessToken
-            }
-          />
+  const detail = (
+    <TicketPanel
+      ticket={
+        selectedTicket
+      }
+      profile={
+        profile
+      }
+      accessToken={
+        accessToken
+      }
+      startingTicket={
+        startingTicket
+      }
+      responseTicket={
+        responseTicket
+      }
+      infoTicket={
+        infoTicket
+      }
+      setResponseTicket={
+        setResponseTicket
+      }
+      setInfoTicket={
+        setInfoTicket
+      }
+      handleStartWork={
+        handleStartWork
+      }
+      onInformationRequested={
+        informationRequested
+      }
+      onClose={() => {
+        setSelected(
+          null,
+        )
+
+        setResponseTicket(
+          null,
+        )
+
+        setInfoTicket(
+          null,
+        )
+      }}
+    />
+  )
 
 
+  const queue = (
+    <section>
+
+      <Heading
+        eyebrow={
+          `Queries / ${department}`
+        }
+        title="Department query queue"
+        subtitle="Unified workspace for assigned queries with routing, SLA and human-review controls."
+        action={
           <button
             type="button"
-            onClick={onLogout}
-            className="px-3 py-1.5 bg-slate-800 hover:bg-red-600 text-slate-300 hover:text-white rounded-lg text-xs font-semibold transition-all border border-slate-700"
+            onClick={
+              loadTickets
+            }
+            disabled={
+              loading
+            }
+            className="flex items-center gap-2 rounded-xl border border-blue-200 bg-white px-4 py-2.5 text-[10px] font-semibold text-blue-700 disabled:opacity-50"
           >
-            Sign Out
+            <Icon
+              name="refresh"
+              className="h-4 w-4"
+            />
+
+            Refresh Queue
           </button>
-
-        </div>
-
-      </header>
+        }
+      />
 
 
-      {/* MAIN */}
+      {stats}
 
-      <main className="flex-1 p-4 md:p-6 overflow-y-auto max-w-7xl mx-auto w-full space-y-5">
 
-        {/* DASHBOARD HEADER */}
+      <section className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_12px_30px_-25px_rgba(15,23,42,0.3)]">
 
-        <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div className="flex items-center justify-between gap-3 px-5 py-4">
 
           <div>
 
-            <h1 className="text-xl font-bold text-slate-900">
-              {roleLabel} Dashboard
-            </h1>
+            <h2 className="text-[17px] font-bold text-slate-900">
+              Assigned queries
+            </h2>
 
-
-            <p className="text-xs text-slate-500 mt-1">
-              Assigned query queue for{' '}
-
-              <span className="font-semibold text-slate-700">
-                {profile?.full_name
-                  || roleLabel}
-              </span>
-            </p>
-
-
-            <p className="text-[11px] text-slate-400 mt-0.5">
-              {departmentLabel}
-
-              {profile?.desk_name
-                ? ` • ${profile.desk_name}`
-                : (
-                  ' • Department-level '
-                  + 'routing'
-                )}
+            <p className="mt-0.5 text-[10px] text-slate-500">
+              Prioritized by source, priority, status and SLA state.
             </p>
 
           </div>
 
 
-          <div className="flex items-center gap-2">
+          <span className="rounded-full bg-blue-50 px-3 py-1 text-[9px] font-bold text-blue-700">
+            {filtered.length} visible
+          </span>
+
+        </div>
+
+
+        <div className="border-y border-slate-100 bg-slate-50/70 p-3">
+
+          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-[1.4fr_0.8fr_0.8fr_0.8fr_auto_auto]">
+
+            <div className="relative">
+
+              <Icon
+                name="search"
+                className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+              />
+
+              <input
+                type="search"
+                value={
+                  search
+                }
+                onChange={
+                  (event) =>
+                    setSearch(
+                      event
+                        .target
+                        .value,
+                    )
+                }
+                placeholder="Search ID, student or subject..."
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3 text-[10px] outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+              />
+
+            </div>
+
+
+            <select
+              value={
+                source
+              }
+              onChange={
+                (event) =>
+                  setSource(
+                    event
+                      .target
+                      .value,
+                  )
+              }
+              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-[10px]"
+            >
+              <option value="ALL">
+                Source: All
+              </option>
+
+              <option value="WEB">
+                Web
+              </option>
+
+              <option value="EMAIL">
+                Gmail
+              </option>
+
+            </select>
+
+
+            <select
+              value={
+                priority
+              }
+              onChange={
+                (event) =>
+                  setPriority(
+                    event
+                      .target
+                      .value,
+                  )
+              }
+              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-[10px]"
+            >
+              <option value="ALL">
+                Priority: All
+              </option>
+
+              <option value="LOW">
+                Low
+              </option>
+
+              <option value="MEDIUM">
+                Medium
+              </option>
+
+              <option value="HIGH">
+                High
+              </option>
+
+              <option value="URGENT">
+                Urgent
+              </option>
+
+            </select>
+
+
+            <select
+              value={
+                status
+              }
+              onChange={
+                (event) =>
+                  setStatus(
+                    event
+                      .target
+                      .value,
+                  )
+              }
+              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-[10px]"
+            >
+              <option value="OPEN">
+                Status: Open
+              </option>
+
+              <option value="ALL">
+                All statuses
+              </option>
+
+              <option value="ROUTED">
+                Assigned
+              </option>
+
+              <option value="IN_PROGRESS">
+                In review
+              </option>
+
+              <option value="NEEDS_INFORMATION">
+                Waiting
+              </option>
+
+              <option value="ESCALATED">
+                Escalated
+              </option>
+
+              <option value="RESOLVED">
+                Resolved
+              </option>
+
+              <option value="CLOSED">
+                Closed
+              </option>
+
+            </select>
+
+
+            <label className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[9px] font-semibold text-slate-600">
+
+              <input
+                type="checkbox"
+                checked={
+                  slaOnly
+                }
+                onChange={
+                  (event) =>
+                    setSlaOnly(
+                      event
+                        .target
+                        .checked,
+                    )
+                }
+              />
+
+              SLA risk only
+
+            </label>
+
 
             <button
               type="button"
-              onClick={() => {
-                setLocalSuccessMessage('')
-                loadTickets()
-              }}
-              disabled={loading}
-              className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-xl text-xs font-semibold border border-blue-200 disabled:opacity-50"
+              onClick={
+                reset
+              }
+              className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-[10px] font-semibold text-slate-600"
             >
-              Refresh Tickets
+              Reset
             </button>
-
-
-            <span className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-xl text-xs font-semibold border border-slate-200">
-
-              Assigned Tickets:{' '}
-
-              <strong>
-                {tickets.length}
-              </strong>
-
-            </span>
 
           </div>
 
         </div>
 
 
-        {/* INSTRUCTOR AVAILABILITY */}
-
-        {profile?.role === 'INSTRUCTOR' && (
-
-          <InstructorAvailabilityPanel
-            accessToken={
-              accessToken
-            }
-            initialAvailable={
-              profile.is_available
-            }
-            initialAutoReply={
-              profile.auto_reply_message
-            }
-          />
-
-        )}
-
-
-        {/* MESSAGES */}
-
-        {errorMessage && (
-
-          <div className="p-3.5 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs">
-            {errorMessage}
-          </div>
-
-        )}
-
-
-        {(successMessage
-          || localSuccessMessage) && (
-
-            <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs">
-              {localSuccessMessage
-                || successMessage}
-            </div>
-
-          )}
-
-
-        {/* LOADING */}
-
-        {loading && (
-
-          <div className="bg-white rounded-2xl p-12 text-center border border-slate-200">
-
-            <div className="inline-block w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin mb-3" />
-
-            <p className="text-xs text-slate-500">
-              Loading assigned tickets...
-            </p>
-
-          </div>
-
-        )}
-
-
-        {/* EMPTY QUEUE */}
-
-        {!loading
-          && !errorMessage
-          && tickets.length === 0 && (
-
-            <div className="bg-white rounded-2xl p-12 text-center border border-slate-200">
-
-              <h3 className="text-sm font-bold text-slate-800 mb-1">
-                No Tickets Assigned
-              </h3>
-
-              <p className="text-xs text-slate-500">
-                No queries are currently
-                assigned to this account.
+        {
+          loading
+            ? (
+              <p className="p-12 text-center text-xs text-slate-500">
+                Loading assigned queries...
               </p>
+            )
 
-            </div>
-
-          )}
-
-
-        {/* TICKETS */}
-
-        <div className="space-y-4">
-
-          {tickets.map(
-            (ticket) => {
-              const ticketNumber =
-                ticket.ticket_number
-                || ticket.ticket_code
-                || ticket.ticket_id
-
-
-              const confidenceValue =
-                ticket.confidence
-                  === null
-                || ticket.confidence
-                  === undefined
-                  ? '—'
-                  : ticket.confidence <= 1
-                    ? `${(
-                      ticket.confidence
-                      * 100
-                    ).toFixed(1)}%`
-                    : `${ticket.confidence}%`
+            : (
+              <QueueTable
+                items={
+                  filtered
+                }
+                profile={
+                  profile
+                }
+                now={
+                  now
+                }
+                onOpen={
+                  openTicket
+                }
+              />
+            )
+        }
 
 
-              const responseAllowed =
-                ticket.status
-                  === 'IN_PROGRESS'
-                || ticket.status
-                  === 'ESCALATED'
+        <div className="flex justify-between gap-3 border-t border-slate-100 px-5 py-4 text-[9px] text-slate-500">
+
+          <span>
+            Showing {filtered.length} of {tickets.length} assigned queries
+          </span>
+
+          <span>
+            All workflow updates remain auditable.
+          </span>
+
+        </div>
+
+      </section>
 
 
-              const resolveAllowed =
-                ticket.status
-                  === 'IN_PROGRESS'
-                || ticket.status
-                  === 'ESCALATED'
+      {detail}
+
+    </section>
+  )
 
 
-              const responseOpen =
-                responseTicketNumber
-                === ticketNumber
+  const simpleTablePage = (
+    eyebrow,
+    title,
+    subtitle,
+    items,
+  ) => (
+    <section>
+
+      <Heading
+        eyebrow={
+          eyebrow
+        }
+        title={
+          title
+        }
+        subtitle={
+          subtitle
+        }
+      />
 
 
-              const informationOpen =
-                informationTicketNumber
-                === ticketNumber
+      <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+
+        <QueueTable
+          items={
+            items
+          }
+          profile={
+            profile
+          }
+          now={
+            now
+          }
+          onOpen={
+            openTicket
+          }
+        />
+
+      </div>
 
 
-              return (
-                <div
-                  key={
-                    ticket.ticket_id
-                    || ticketNumber
-                  }
-                  className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
-                >
+      {detail}
 
-                  {/* TICKET HEADER */}
+    </section>
+  )
 
-                  <div className="bg-slate-50 border-b border-slate-200 px-5 py-3.5 flex flex-wrap justify-between items-center gap-3">
 
-                    <div className="flex items-center gap-2.5">
+  const statusCounts = [
+    [
+      'Assigned',
 
-                      <span className="font-mono text-sm font-bold text-slate-900 bg-slate-200 px-2.5 py-0.5 rounded">
-                        {ticketNumber}
-                      </span>
+      tickets.filter(
+        (ticket) =>
+          ticket.status
+          === 'ROUTED',
+      ).length,
+
+      'bg-blue-500',
+    ],
+
+    [
+      'In review',
+
+      tickets.filter(
+        (ticket) =>
+          ticket.status
+          === 'IN_PROGRESS',
+      ).length,
+
+      'bg-amber-500',
+    ],
+
+    [
+      'Waiting',
+      needsInfo.length,
+      'bg-violet-500',
+    ],
+
+    [
+      'Escalated',
+      escalations.length,
+      'bg-rose-500',
+    ],
+
+    [
+      'Resolved',
+
+      tickets.filter(
+        (ticket) =>
+          [
+            'RESOLVED',
+            'CLOSED',
+          ].includes(
+            ticket.status,
+          ),
+      ).length,
+
+      'bg-emerald-500',
+    ],
+  ]
+
+
+  const maxStatus =
+    Math.max(
+      1,
+
+      ...statusCounts.map(
+        ([
+          ,
+          count,
+        ]) =>
+          count,
+      ),
+    )
+
+
+  const categories =
+    Object.entries(
+      tickets.reduce(
+        (
+          result,
+          ticket,
+        ) => {
+          const key =
+            cleanText(
+              ticket.category
+              || 'Uncategorized',
+            )
+
+          result[
+            key
+          ] =
+            (
+              result[
+              key
+              ]
+              || 0
+            )
+            + 1
+
+          return result
+        },
+
+        {},
+      ),
+    )
+      .sort(
+        (
+          a,
+          b,
+        ) =>
+          b[1] - a[1],
+      )
+      .slice(
+        0,
+        6,
+      )
+
+
+  const overview = (
+    <section>
+
+      <Heading
+        eyebrow="Department Staff Portal / Overview"
+        title="Department operations overview"
+        subtitle="Review assigned workload, draft readiness, escalations and SLA risk."
+        action={
+          <button
+            type="button"
+            onClick={
+              () =>
+                go(
+                  'queue',
+                )
+            }
+            className="rounded-xl bg-blue-600 px-4 py-2.5 text-[10px] font-semibold text-white"
+          >
+            Open Department Queue
+          </button>
+        }
+      />
+
+
+      {stats}
+
+
+      <div className="mt-5 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5">
+
+          <h2 className="text-[16px] font-bold text-slate-900">
+            Recent assigned queries
+          </h2>
+
+
+          <div className="mt-4 space-y-2">
+
+            {
+              tickets
+                .slice(
+                  0,
+                  5,
+                )
+                .map(
+                  (ticket) => (
+                    <button
+                      type="button"
+                      key={
+                        ticket.ticket_id
+                        || numberOf(
+                          ticket,
+                        )
+                      }
+                      onClick={() => {
+                        navigate(
+                          '/staff',
+                        )
+
+                        openTicket(
+                          ticket,
+                        )
+                      }}
+                      className="flex w-full items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3 text-left hover:bg-blue-50"
+                    >
+
+                      <div className="min-w-0">
+
+                        <p className="font-mono text-[8px] font-bold text-blue-600">
+                          {
+                            numberOf(
+                              ticket,
+                            )
+                          }
+                        </p>
+
+                        <p className="mt-1 truncate text-[10px] font-semibold">
+                          {
+                            cleanText(
+                              ticket.subject
+                              || 'Untitled query',
+                            )
+                          }
+                        </p>
+
+                      </div>
 
 
                       <span
                         className={
-                          'px-2.5 py-0.5 '
-                          + 'rounded-full '
-                          + 'text-[10px] '
-                          + 'font-bold border '
-                          + 'uppercase '
-                          + getStatusBadge(
+                          'rounded-full border px-2 py-1 text-[7px] font-bold '
+                          + statusTone(
                             ticket.status,
                           )
                         }
                       >
-                        {ticket.status}
+                        {
+                          STATUS_LABELS[
+                          ticket.status
+                          ]
+                          || ticket.status
+                        }
+                      </span>
+
+                    </button>
+                  ),
+                )
+            }
+
+
+            {!tickets.length && (
+              <p className="py-8 text-center text-xs text-slate-500">
+                No assigned queries.
+              </p>
+            )}
+
+          </div>
+
+        </section>
+
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5">
+
+          <h2 className="text-[16px] font-bold text-slate-900">
+            Workload by status
+          </h2>
+
+
+          <div className="mt-5 space-y-4">
+
+            {
+              statusCounts.map(
+                ([
+                  label,
+                  count,
+                  color,
+                ]) => (
+                  <div
+                    key={
+                      label
+                    }
+                  >
+
+                    <div className="flex justify-between text-[9px] font-semibold text-slate-600">
+
+                      <span>
+                        {label}
+                      </span>
+
+                      <span>
+                        {count}
                       </span>
 
                     </div>
 
 
-                    <div className="flex flex-wrap items-center gap-2 text-[10px]">
+                    <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-slate-100">
 
-                      <span className="px-2 py-1 bg-slate-200 text-slate-700 rounded">
-                        {cleanText(
-                          ticket.source
-                          || 'WEB',
-                        )}
-                      </span>
+                      <div
+                        className={
+                          `h-full ${color}`
+                        }
+                        style={{
+                          width:
+                            count
+                              ? (
+                                `${Math.max(
+                                  4,
 
-
-                      <span className="px-2 py-1 bg-purple-50 text-purple-700 rounded border border-purple-200">
-                        Priority:{' '}
-                        {ticket.priority
-                          || '—'}
-                      </span>
-
-
-                      <span className="px-2 py-1 bg-blue-50 text-blue-700 rounded border border-blue-200">
-                        Confidence:{' '}
-                        {confidenceValue}
-                      </span>
+                                  (
+                                    count
+                                    / maxStatus
+                                  )
+                                  * 100,
+                                )}%`
+                              )
+                              : '0%',
+                        }}
+                      />
 
                     </div>
 
                   </div>
+                ),
+              )
+            }
+
+          </div>
+
+        </section>
+
+      </div>
+
+    </section>
+  )
 
 
-                  {/* TICKET CONTENT */}
+  const workload = (
+    <section>
 
-                  <div className="p-5 grid grid-cols-1 lg:grid-cols-12 gap-5">
-
-                    {/* STUDENT QUERY */}
-
-                    <div className="lg:col-span-7 space-y-3">
-
-                      <div>
-
-                        <div className="text-xs text-slate-500 mb-1">
-
-                          Student:{' '}
-
-                          <strong className="text-slate-800">
-                            {cleanText(
-                              ticket.student_name
-                              || 'Student',
-                            )}
-                          </strong>
+      <Heading
+        eyebrow="Department Staff Portal / Staff Workload"
+        title="Staff workload"
+        subtitle="Real summary calculated from the currently assigned query records."
+      />
 
 
-                          <span className="mx-2">
-                            •
-                          </span>
+      <div className="mt-5 grid gap-4 xl:grid-cols-2">
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5">
+
+          <h2 className="text-[16px] font-bold">
+            Status workload
+          </h2>
 
 
-                          Category:{' '}
+          <div className="mt-5 space-y-4">
 
-                          <strong className="text-blue-600">
-                            {cleanText(
-                              ticket.category
-                              || 'Uncategorized',
-                            )}
-                          </strong>
+            {
+              statusCounts.map(
+                ([
+                  label,
+                  count,
+                  color,
+                ]) => (
+                  <div
+                    key={
+                      label
+                    }
+                  >
 
-                        </div>
+                    <div className="flex justify-between text-[9px] font-semibold">
+
+                      <span>
+                        {label}
+                      </span>
+
+                      <span>
+                        {count}
+                      </span>
+
+                    </div>
 
 
-                        <h2 className="text-base font-bold text-slate-900">
-                          {cleanText(
+                    <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-slate-100">
+
+                      <div
+                        className={
+                          `h-full ${color}`
+                        }
+                        style={{
+                          width:
+                            count
+                              ? (
+                                `${Math.max(
+                                  4,
+
+                                  (
+                                    count
+                                    / maxStatus
+                                  )
+                                  * 100,
+                                )}%`
+                              )
+                              : '0%',
+                        }}
+                      />
+
+                    </div>
+
+                  </div>
+                ),
+              )
+            }
+
+          </div>
+
+        </section>
+
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5">
+
+          <h2 className="text-[16px] font-bold">
+            Top categories
+          </h2>
+
+
+          <div className="mt-5 space-y-3">
+
+            {
+              categories.map(
+                ([
+                  category,
+                  count,
+                ]) => (
+                  <div
+                    key={
+                      category
+                    }
+                    className="flex justify-between rounded-xl bg-slate-50 px-4 py-3"
+                  >
+
+                    <span className="truncate text-[10px] font-semibold">
+                      {category}
+                    </span>
+
+                    <span className="rounded-full bg-blue-50 px-2 py-1 text-[9px] font-bold text-blue-700">
+                      {count}
+                    </span>
+
+                  </div>
+                ),
+              )
+            }
+
+
+            {!categories.length && (
+              <p className="py-8 text-center text-xs text-slate-500">
+                No workload data.
+              </p>
+            )}
+
+          </div>
+
+        </section>
+
+      </div>
+
+    </section>
+  )
+
+
+  const routing = (
+    <section>
+
+      <Heading
+        eyebrow="Smart Routing & SLA / Routing Monitor"
+        title="Routing status monitor"
+        subtitle="Current persisted routing and workflow state; this is status tracking rather than a continuous real-time stream."
+        action={
+          <button
+            type="button"
+            onClick={
+              loadTickets
+            }
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-[10px] font-semibold"
+          >
+            Refresh status
+          </button>
+        }
+      />
+
+
+      <div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+
+        {
+          openTickets.map(
+            (ticket) => {
+              const info =
+                sla(
+                  ticket,
+                  now,
+                )
+
+              return (
+                <button
+                  type="button"
+                  key={
+                    ticket.ticket_id
+                    || numberOf(
+                      ticket,
+                    )
+                  }
+                  onClick={() => {
+                    navigate(
+                      '/staff',
+                    )
+
+                    openTicket(
+                      ticket,
+                    )
+                  }}
+                  className="rounded-2xl border border-slate-200 bg-white p-4 text-left hover:border-blue-200"
+                >
+
+                  <div className="flex justify-between gap-3">
+
+                    <div className="min-w-0">
+
+                      <p className="font-mono text-[8px] font-bold text-blue-600">
+                        {
+                          numberOf(
+                            ticket,
+                          )
+                        }
+                      </p>
+
+                      <p className="mt-1 truncate text-[10px] font-semibold">
+                        {
+                          cleanText(
                             ticket.subject
                             || 'Untitled query',
-                          )}
-                        </h2>
-
-                      </div>
-
-
-                      <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-xs text-slate-700 leading-relaxed whitespace-pre-wrap">
-                        {cleanText(
-                          ticket.message
-                          || 'No message available.',
-                        )}
-                      </div>
+                          )
+                        }
+                      </p>
 
                     </div>
 
 
-                    {/* AI + ACTIONS */}
+                    <span
+                      className={
+                        'h-fit rounded-full border px-2 py-1 text-[7px] font-bold '
+                        + statusTone(
+                          ticket.status,
+                        )
+                      }
+                    >
+                      {
+                        STATUS_LABELS[
+                        ticket.status
+                        ]
+                        || ticket.status
+                      }
+                    </span>
 
-                    <div className="lg:col-span-5 bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-3">
-
-                      <div className="flex justify-between gap-2">
-
-                        <span className="text-[10px] font-bold text-blue-600 uppercase">
-                          AI Analysis
-                        </span>
-
-
-                        <span
-                          className={
-                            'text-[9px] '
-                            + 'font-bold '
-                            + 'px-2 py-0.5 '
-                            + 'rounded '
-                            + (
-                              ticket
-                                .requires_manual_review
-                                ? (
-                                  'bg-amber-100 '
-                                  + 'text-amber-800'
-                                )
-                                : (
-                                  'bg-emerald-100 '
-                                  + 'text-emerald-800'
-                                )
-                            )
-                          }
-                        >
-                          {ticket
-                            .requires_manual_review
-                            ? (
-                              'Manual Review '
-                              + 'Required'
-                            )
-                            : 'AI Processed'}
-                        </span>
-
-                      </div>
+                  </div>
 
 
-                      <div>
+                  <div className="mt-4 grid grid-cols-2 gap-2">
 
-                        <span className="text-[10px] text-slate-400 block">
-                          Intent
-                        </span>
+                    <div className="rounded-xl bg-slate-50 p-3">
 
-                        <p className="text-xs text-slate-700">
-                          {cleanText(
-                            ticket.ai_intent
-                            || 'Not available',
-                          )}
-                        </p>
+                      <p className="text-[8px] text-slate-400">
+                        Category
+                      </p>
 
-                      </div>
+                      <p className="mt-1 truncate text-[9px] font-semibold">
+                        {
+                          cleanText(
+                            ticket.category
+                            || department,
+                          )
+                        }
+                      </p>
 
-
-                      <div>
-
-                        <span className="text-[10px] text-slate-400 block">
-                          Summary
-                        </span>
-
-                        <p className="text-xs text-slate-700">
-                          {cleanText(
-                            ticket.ai_summary
-                            || 'Not available',
-                          )}
-                        </p>
-
-                      </div>
+                    </div>
 
 
-                      <div>
+                    <div className="rounded-xl bg-slate-50 p-3">
 
-                        <span className="text-[10px] text-slate-400 block mb-1">
-                          AI Draft Reply
-                        </span>
+                      <p className="text-[8px] text-slate-400">
+                        SLA
+                      </p>
 
-                        <div className="bg-white p-3 rounded-lg border border-slate-200 text-xs text-slate-700 whitespace-pre-wrap">
-                          {cleanText(
-                            ticket.ai_draft_reply
-                            || (
-                              'No AI draft reply '
-                              + 'available.'
-                            ),
-                          )}
-                        </div>
-
-                      </div>
-
-
-                      {/* START WORK */}
-
-                      {ticket.status
-                        === 'ROUTED' && (
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setLocalSuccessMessage('')
-
-                              handleStartWork(
-                                ticketNumber,
-                              )
-                            }}
-                            disabled={
-                              startingTicket
-                              === ticketNumber
-                            }
-                            className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {startingTicket
-                              === ticketNumber
-                                ? 'Starting...'
-                                : 'Start Work'}
-                          </button>
-
-                        )}
-
-
-                      {/* RESPONSE / INFO REQUEST */}
-
-                      {responseAllowed && (
-
-                        <>
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setInformationTicketNumber(
-                                null,
-                              )
-
-                              setResponseTicketNumber(
-                                responseOpen
-                                  ? null
-                                  : ticketNumber,
-                              )
-                            }}
-                            className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold"
-                          >
-                            {responseOpen
-                              ? (
-                                'Hide Response '
-                                + 'Workspace'
-                              )
-                              : (
-                                'Review Final '
-                                + 'Response'
-                              )}
-                          </button>
-
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setResponseTicketNumber(
-                                null,
-                              )
-
-                              setInformationTicketNumber(
-                                informationOpen
-                                  ? null
-                                  : ticketNumber,
-                              )
-                            }}
-                            className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-semibold"
-                          >
-                            {informationOpen
-                              ? (
-                                'Cancel Information '
-                                + 'Request'
-                              )
-                              : (
-                                'Request More '
-                                + 'Information'
-                              )}
-                          </button>
-
-                        </>
-
-                      )}
-
-
-                      {/* RESOLVE */}
-
-                      {resolveAllowed && (
-
-                        <>
-
-                          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-
-                            <p className="text-[11px] font-semibold text-emerald-800">
-                              Resolution requirement
-                            </p>
-
-                            <p className="mt-1 text-[10px] leading-relaxed text-emerald-700">
-                              Resolve only after the approved
-                              final response has been delivered
-                              successfully to the student.
-                            </p>
-
-                          </div>
-
-
-                          <button
-                            type="button"
-                            onClick={() =>
-                              handleResolve(
-                                ticketNumber,
-                              )
-                            }
-                            disabled={
-                              resolvingTicket
-                              === ticketNumber
-                            }
-                            className="w-full rounded-xl bg-emerald-600 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {resolvingTicket
-                              === ticketNumber
-                                ? 'Resolving...'
-                                : 'Resolve Ticket'}
-                          </button>
-
-                        </>
-
-                      )}
-
-
-                      {/* NEEDS INFORMATION */}
-
-                      {ticket.status
-                        === 'NEEDS_INFORMATION' && (
-
-                          <div className="bg-purple-50 border border-purple-200 rounded-xl p-3">
-
-                            <p className="text-xs font-bold text-purple-800">
-                              Waiting for student
-                              information
-                            </p>
-
-                            <p className="text-[11px] text-purple-700 mt-1">
-                              Additional information
-                              has been requested from
-                              the student.
-                            </p>
-
-                          </div>
-
-                        )}
-
-
-                      {/* RESOLVED */}
-
-                      {ticket.status
-                        === 'RESOLVED' && (
-
-                          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-center text-xs font-semibold text-emerald-800">
-                            Ticket resolved
-                          </div>
-
-                        )}
+                      <p
+                        className={
+                          'mt-1 text-[9px] font-semibold '
+                          + (
+                            info.risk
+                              ? 'text-rose-600'
+                              : ''
+                          )
+                        }
+                      >
+                        {info.main}
+                      </p>
 
                     </div>
 
                   </div>
 
-
-                  {/* RESPONSE WORKSPACE */}
-
-                  {responseOpen && (
-
-                    <div className="px-5 pb-5">
-
-                      <TicketResponseWorkspace
-                        accessToken={
-                          accessToken
-                        }
-                        ticketNumber={
-                          ticketNumber
-                        }
-                        onClose={() => {
-                          setResponseTicketNumber(
-                            null,
-                          )
-                        }}
-                      />
-
-                    </div>
-
-                  )}
-
-
-                  {/* INFORMATION REQUEST WORKSPACE */}
-
-                  {informationOpen && (
-
-                    <div className="px-5 pb-5">
-
-                      <InformationRequestWorkspace
-                        accessToken={
-                          accessToken
-                        }
-                        ticketNumber={
-                          ticketNumber
-                        }
-                        onClose={() => {
-                          setInformationTicketNumber(
-                            null,
-                          )
-                        }}
-                        onRequested={
-                          handleInformationRequested
-                        }
-                      />
-
-                    </div>
-
-                  )}
-
-                </div>
+                </button>
               )
             },
-          )}
+          )
+        }
+
+
+        {!openTickets.length && (
+          <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-xs text-slate-500 md:col-span-2 xl:col-span-3">
+            No active queries.
+          </div>
+        )}
+
+      </div>
+
+    </section>
+  )
+
+
+  const notifications = (
+    <StaffNotificationsPage
+      accessToken={
+        accessToken
+      }
+    />
+  )
+
+
+  const reports = (
+    <section>
+
+      <Heading
+        eyebrow="Department Staff Portal / Export & Reports"
+        title="Queue export"
+        subtitle="Export only the assigned records already available to this signed-in staff account."
+      />
+
+
+      <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-6">
+
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
+          <Icon name="report" />
+        </div>
+
+        <h2 className="mt-4 text-[16px] font-bold">
+          Current queue CSV
+        </h2>
+
+        <p className="mt-2 max-w-xl text-[10px] leading-5 text-slate-500">
+          The export follows the current queue filters and does not request unauthorized records.
+        </p>
+
+        <button
+          type="button"
+          onClick={
+            exportCsv
+          }
+          className="mt-5 rounded-xl bg-emerald-600 px-5 py-2.5 text-[10px] font-semibold text-white"
+        >
+          Export Current Queue CSV
+        </button>
+
+      </div>
+
+    </section>
+  )
+
+
+  const profileView = (
+    <section>
+
+      <Heading
+        eyebrow="Department Staff Portal / Profile & Security"
+        title="Profile & security"
+        subtitle="Authenticated SmartQuery identity and access context."
+      />
+
+
+      <div className="mt-5 grid gap-4 xl:grid-cols-2">
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5">
+
+          <div className="flex items-center gap-4">
+
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 text-[15px] font-bold text-blue-600">
+              {
+                initials
+                || 'DS'
+              }
+            </div>
+
+
+            <div className="min-w-0">
+
+              <h2 className="truncate text-[17px] font-bold">
+                {
+                  profile?.full_name
+                  || 'Department Staff'
+                }
+              </h2>
+
+              <p className="mt-1 truncate text-[10px] text-slate-500">
+                {
+                  profile?.email
+                  || 'Email unavailable'
+                }
+              </p>
+
+            </div>
+
+          </div>
+
+
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+
+            <div className="rounded-xl bg-slate-50 p-4">
+
+              <p className="text-[8px] uppercase text-slate-400">
+                Role
+              </p>
+
+              <p className="mt-1 text-[10px] font-semibold">
+                {
+                  profile?.role
+                  || 'DEPARTMENT_STAFF'
+                }
+              </p>
+
+            </div>
+
+
+            <div className="rounded-xl bg-slate-50 p-4">
+
+              <p className="text-[8px] uppercase text-slate-400">
+                Department
+              </p>
+
+              <p className="mt-1 text-[10px] font-semibold">
+                {department}
+              </p>
+
+            </div>
+
+          </div>
+
+        </section>
+
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-5">
+
+          <h2 className="text-[16px] font-bold">
+            Security controls
+          </h2>
+
+
+          <div className="mt-4 space-y-3">
+
+            {
+              [
+                'Google-authenticated session required',
+
+                'Backend role and department authorization',
+
+                'Audited workflow actions',
+
+                'Human approval required before official AI-assisted replies',
+              ].map(
+                (item) => (
+                  <div
+                    key={
+                      item
+                    }
+                    className="rounded-xl bg-slate-50 p-3 text-[10px] text-slate-600"
+                  >
+                    ✓ {item}
+                  </div>
+                ),
+              )
+            }
+
+          </div>
+
+        </section>
+
+      </div>
+
+    </section>
+  )
+
+
+  let content =
+    queue
+
+
+  if (
+    page === 'overview'
+  ) {
+    content =
+      overview
+  }
+
+
+  if (
+    page === 'drafts'
+  ) {
+    content = (
+      <StaffDraftReviewPage
+        tickets={
+          drafts
+        }
+        profile={
+          profile
+        }
+        accessToken={
+          accessToken
+        }
+        startingTicket={
+          startingTicket
+        }
+        resolvingTicket={
+          resolvingTicket
+        }
+        handleStartWork={
+          handleStartWork
+        }
+        handleResolveTicket={
+          handleResolveTicket
+        }
+        loadTickets={
+          loadTickets
+        }
+      />
+    )
+  }
+
+
+  if (
+    page === 'assignments'
+  ) {
+    content =
+      simpleTablePage(
+        'Department Staff Portal / Assignments',
+
+        'My assignments',
+
+        'Queries returned by the authorized staff assignment endpoint.',
+
+        tickets,
+      )
+  }
+
+
+  if (
+    page === 'workload'
+  ) {
+    content =
+      workload
+  }
+
+
+  if (
+    page === 'routing'
+  ) {
+    content =
+      routing
+  }
+
+
+  if (
+    page === 'escalations'
+  ) {
+    content =
+      simpleTablePage(
+        'Smart Routing & SLA / Escalations',
+
+        'Escalations',
+
+        'Assigned tickets currently marked as escalated.',
+
+        escalations,
+      )
+  }
+
+
+  if (
+    page === 'notifications'
+  ) {
+    content =
+      notifications
+  }
+
+
+  if (
+    page === 'reports'
+  ) {
+    content =
+      reports
+  }
+
+
+  if (
+    page === 'profile'
+  ) {
+    content =
+      profileView
+  }
+
+
+  return (
+    <div className="fixed inset-0 flex overflow-hidden bg-[#eef5fb] font-sans text-slate-800">
+
+      <aside
+        className="hidden h-full min-h-0 w-[244px] shrink-0 flex-col overflow-x-hidden overflow-y-auto bg-[#071a35] px-3.5 py-5 text-white [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:flex"
+        style={{
+          msOverflowStyle:
+            'none',
+        }}
+      >
+
+        <Brand />
+
+
+        <p className="mt-6 px-3 text-[8px] font-bold uppercase tracking-[0.18em] text-slate-500">
+          Department Staff Portal
+        </p>
+
+
+        <nav
+          className="mt-3 space-y-1"
+          aria-label="Department staff portal"
+        >
+
+          <NavButton
+            icon="home"
+            label="Overview"
+            active={
+              page
+              === 'overview'
+            }
+            onClick={() =>
+              go(
+                'overview',
+              )
+            }
+          />
+
+
+          <NavButton
+            icon="queue"
+            label="Department Queue"
+            badge={
+              openTickets.length
+            }
+            active={
+              page
+              === 'queue'
+            }
+            onClick={() =>
+              go(
+                'queue',
+              )
+            }
+          />
+
+
+          <NavButton
+            icon="draft"
+            label="Draft Responses"
+            badge={
+              drafts.length
+            }
+            active={
+              page
+              === 'drafts'
+            }
+            onClick={() =>
+              go(
+                'drafts',
+              )
+            }
+          />
+
+
+          <NavButton
+            icon="assignment"
+            label="Assignments"
+            active={
+              page
+              === 'assignments'
+            }
+            onClick={() =>
+              go(
+                'assignments',
+              )
+            }
+          />
+
+
+          <div className="mx-2 my-3 border-t border-white/10" />
+
+
+          <NavButton
+            icon="workload"
+            label="Staff Workload"
+            active={
+              page
+              === 'workload'
+            }
+            onClick={() =>
+              go(
+                'workload',
+              )
+            }
+          />
+
+
+          <NavButton
+            icon="routing"
+            label="Routing Monitor"
+            note="STATUS"
+            active={
+              page
+              === 'routing'
+            }
+            onClick={() =>
+              go(
+                'routing',
+              )
+            }
+          />
+
+
+          <NavButton
+            icon="alert"
+            label="Escalations"
+            badge={
+              escalations.length
+            }
+            active={
+              page
+              === 'escalations'
+            }
+            onClick={() =>
+              go(
+                'escalations',
+              )
+            }
+          />
+
+
+          <NavButton
+            icon="bell"
+            label="Notifications"
+            active={
+              page
+              === 'notifications'
+            }
+            onClick={() =>
+              go(
+                'notifications',
+              )
+            }
+          />
+
+
+          <NavButton
+            icon="report"
+            label="Export & Reports"
+            active={
+              page
+              === 'reports'
+            }
+            onClick={() =>
+              go(
+                'reports',
+              )
+            }
+          />
+
+
+          <NavButton
+            icon="user"
+            label="Profile & Security"
+            active={
+              page
+              === 'profile'
+            }
+            onClick={() =>
+              go(
+                'profile',
+              )
+            }
+          />
+
+        </nav>
+
+
+        <div className="mt-auto pt-4">
+
+          <div className="rounded-2xl border border-blue-400/15 bg-white/[0.04] p-4">
+
+            <div className="flex items-center gap-2 text-[10px] font-semibold">
+
+              <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+
+              System Operational
+
+            </div>
+
+
+            <div className="mt-4 space-y-2 border-t border-white/10 pt-3 text-[8px] text-slate-400">
+
+              <div className="flex justify-between">
+
+                <span>
+                  Routing workflow
+                </span>
+
+                <span className="text-emerald-400">
+                  Available
+                </span>
+
+              </div>
+
+
+              <div className="flex justify-between">
+
+                <span>
+                  Gmail delivery
+                </span>
+
+                <span className="text-emerald-400">
+                  Available
+                </span>
+
+              </div>
+
+
+              <div className="flex justify-between">
+
+                <span>
+                  SLA tracking
+                </span>
+
+                <span className="text-blue-300">
+                  Active
+                </span>
+
+              </div>
+
+            </div>
+
+
+            <p className="mt-4 rounded-xl bg-blue-500/10 p-3 text-[8px] leading-4 text-slate-400">
+              AI cannot send an official reply without authorized human approval.
+            </p>
+
+          </div>
 
         </div>
 
-      </main>
+      </aside>
+
+
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+
+        <header className="z-30 flex h-[72px] shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white px-5 lg:px-7">
+
+          <div className="min-w-0">
+
+            <p className="truncate text-[17px] font-bold text-slate-900">
+              Department Staff Portal
+            </p>
+
+            <p className="mt-0.5 hidden text-[9px] text-slate-500 sm:block">
+              {department} · Query Operations
+            </p>
+
+          </div>
+
+
+          <div className="flex min-w-0 items-center gap-3">
+
+            <form
+              onSubmit={(event) => {
+                event.preventDefault()
+
+                go(
+                  'queue',
+                )
+              }}
+              className="relative hidden w-[290px] xl:block"
+            >
+
+              <Icon
+                name="search"
+                className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+              />
+
+              <input
+                type="search"
+                value={
+                  search
+                }
+                onChange={
+                  (event) =>
+                    setSearch(
+                      event
+                        .target
+                        .value,
+                    )
+                }
+                placeholder="Search query or student..."
+                className="h-10 w-full rounded-full border border-slate-200 bg-slate-50 pl-11 pr-4 text-[10px] outline-none focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
+              />
+
+            </form>
+
+
+            <NotificationBell
+              accessToken={
+                accessToken
+              }
+            />
+
+
+            <div className="hidden h-10 w-10 items-center justify-center rounded-full bg-blue-50 text-[10px] font-bold text-blue-600 sm:flex">
+              {
+                initials
+                || 'DS'
+              }
+            </div>
+
+
+            <div className="hidden min-w-0 sm:block">
+
+              <p className="max-w-[150px] truncate text-[10px] font-semibold">
+                {
+                  profile?.full_name
+                  || 'Department Staff'
+                }
+              </p>
+
+              <p className="mt-0.5 max-w-[170px] truncate text-[8px] text-slate-500">
+                {department} · Authorized user
+              </p>
+
+            </div>
+
+
+            <button
+              type="button"
+              onClick={
+                onLogout
+              }
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[9px] font-semibold text-slate-600 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
+            >
+              Sign Out
+            </button>
+
+          </div>
+
+        </header>
+
+
+        <main className="relative min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
+
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-blue-100/60"
+          />
+
+
+          <div className="relative z-10 mx-auto w-full max-w-[1500px] p-4 md:p-6">
+
+            {errorMessage && (
+              <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-[10px] text-rose-700">
+                {errorMessage}
+              </div>
+            )}
+
+
+            {(successMessage
+              || localMessage) && (
+                <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-[10px] text-emerald-800">
+                  {
+                    localMessage
+                    || successMessage
+                  }
+                </div>
+              )}
+
+
+            {content}
+
+          </div>
+
+        </main>
+
+      </div>
 
     </div>
   )

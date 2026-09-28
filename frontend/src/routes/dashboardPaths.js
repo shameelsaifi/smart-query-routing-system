@@ -1,6 +1,14 @@
 export function getDashboardPath(profile) {
+  if (!profile) {
+    return null
+  }
+
   if (profile.role === 'STUDENT') {
     return '/student'
+  }
+
+  if (profile.role === 'INSTRUCTOR') {
+    return '/instructor'
   }
 
   if (profile.role === 'HOD') {
@@ -9,10 +17,6 @@ export function getDashboardPath(profile) {
 
   if (profile.role === 'ADMIN') {
     return '/admin'
-  }
-
-  if (profile.role === 'INSTRUCTOR') {
-    return '/staff'
   }
 
   if (profile.role === 'DEPARTMENT_STAFF') {

@@ -1,5 +1,13 @@
-import { lazy, Suspense } from 'react'
-import { Navigate, Route, Routes } from 'react-router'
+import {
+  lazy,
+  Suspense,
+} from 'react'
+
+import {
+  Navigate,
+  Route,
+  Routes,
+} from 'react-router'
 
 import AccessDenied from '../components/common/AccessDenied'
 import PageLoader from '../components/common/PageLoader'
@@ -10,75 +18,156 @@ import { getDashboardPath } from './dashboardPaths'
 
 
 const AdminDashboard = lazy(
-  () => import('../pages/admin/AdminDashboard'),
+  () =>
+    import(
+      '../pages/admin/AdminDashboard'
+    ),
 )
 
 const FeeBillingDashboard = lazy(
-  () => import('../pages/accounts/FeeBillingDashboard'),
+  () =>
+    import(
+      '../pages/accounts/FeeBillingDashboard'
+    ),
 )
 
 const RefundsDashboard = lazy(
-  () => import('../pages/accounts/RefundsDashboard'),
+  () =>
+    import(
+      '../pages/accounts/RefundsDashboard'
+    ),
 )
 
 const ScholarshipDashboard = lazy(
-  () => import('../pages/accounts/ScholarshipDashboard'),
+  () =>
+    import(
+      '../pages/accounts/ScholarshipDashboard'
+    ),
 )
 
 const HodDashboard = lazy(
-  () => import('../pages/hod/HodDashboard'),
+  () =>
+    import(
+      '../pages/hod/HodDashboard'
+    ),
 )
 
 const StudentDashboard = lazy(
-  () => import('../pages/student/StudentDashboard'),
+  () =>
+    import(
+      '../pages/student/StudentDashboard'
+    ),
 )
 
 const StaffDashboard = lazy(
-  () => import('../pages/staff/StaffDashboard'),
+  () =>
+    import(
+      '../pages/staff/StaffDashboard'
+    ),
+)
+
+const InstructorDashboard = lazy(
+  () =>
+    import(
+      '../pages/instructor/InstructorDashboard'
+    ),
 )
 
 
 const dashboardRoutes = [
   {
-    path: '/student',
-    roles: ['STUDENT'],
-    Component: StudentDashboard,
-  },
-  {
-    path: '/hod',
-    roles: ['HOD'],
-    Component: HodDashboard,
-  },
-  {
-    path: '/admin',
-    roles: ['ADMIN'],
-    Component: AdminDashboard,
-  },
-  {
-    path: '/staff',
+    path: '/student/*',
+
     roles: [
-      'DEPARTMENT_STAFF',
+      'STUDENT',
+    ],
+
+    Component:
+      StudentDashboard,
+  },
+
+  {
+    path: '/instructor/*',
+
+    roles: [
       'INSTRUCTOR',
     ],
-    Component: StaffDashboard,
+
+    Component:
+      InstructorDashboard,
   },
+
   {
-    path: '/accounts/fee-billing',
-    roles: ['DEPARTMENT_STAFF'],
-    desk: 'FEE_BILLING',
-    Component: FeeBillingDashboard,
+    path: '/hod/*',
+
+    roles: [
+      'HOD',
+    ],
+
+    Component:
+      HodDashboard,
   },
+
   {
-    path: '/accounts/scholarship',
-    roles: ['DEPARTMENT_STAFF'],
-    desk: 'SCHOLARSHIP',
-    Component: ScholarshipDashboard,
+    path: '/admin/*',
+
+    roles: [
+      'ADMIN',
+    ],
+
+    Component:
+      AdminDashboard,
   },
+
   {
-    path: '/accounts/refunds',
-    roles: ['DEPARTMENT_STAFF'],
-    desk: 'REFUNDS',
-    Component: RefundsDashboard,
+    path: '/staff/*',
+    roles: [
+      'DEPARTMENT_STAFF',
+    ],
+    Component:
+      StaffDashboard,
+  },
+
+  {
+    path: '/accounts/fee-billing/*',
+
+    roles: [
+      'DEPARTMENT_STAFF',
+    ],
+
+    desk:
+      'FEE_BILLING',
+
+    Component:
+      FeeBillingDashboard,
+  },
+
+  {
+    path: '/accounts/scholarship/*',
+
+    roles: [
+      'DEPARTMENT_STAFF',
+    ],
+
+    desk:
+      'SCHOLARSHIP',
+
+    Component:
+      ScholarshipDashboard,
+  },
+
+  {
+    path: '/accounts/refunds/*',
+
+    roles: [
+      'DEPARTMENT_STAFF',
+    ],
+
+    desk:
+      'REFUNDS',
+
+    Component:
+      RefundsDashboard,
   },
 ]
 
@@ -99,35 +188,58 @@ export default function AppRoutes() {
     retryProfile,
   } = useAuth()
 
+
   if (signingOut) {
     return (
-      <PageLoader message="Signing out..." />
-    )
-  }
-
-  if (authLoading) {
-    return (
-      <PageLoader message="Checking authentication..." />
-    )
-  }
-
-  if (!session) {
-    return (
-      <LoginPage
-        onGoogleLogin={handleGoogleLogin}
-        loading={loginLoading}
-        errorMessage={errorMessage}
+      <PageLoader
+        message="Signing out..."
       />
     )
   }
 
-  if (!profile && provisioning) {
+
+  if (authLoading) {
     return (
-      <PageLoader message="Checking account access..." />
+      <PageLoader
+        message="Checking authentication..."
+      />
     )
   }
 
-  if (errorMessage || !profile) {
+
+  if (!session) {
+    return (
+      <LoginPage
+        onGoogleLogin={
+          handleGoogleLogin
+        }
+        loading={
+          loginLoading
+        }
+        errorMessage={
+          errorMessage
+        }
+      />
+    )
+  }
+
+
+  if (
+    !profile
+    && provisioning
+  ) {
+    return (
+      <PageLoader
+        message="Checking account access..."
+      />
+    )
+  }
+
+
+  if (
+    errorMessage
+    || !profile
+  ) {
     const title =
       errorKind === 'access'
         ? 'Access Denied'
@@ -140,95 +252,134 @@ export default function AppRoutes() {
         title={title}
         message={
           errorMessage
-          || 'Your application profile could not be loaded.'
+          || (
+            'Your application profile '
+            + 'could not be loaded.'
+          )
         }
-        onRetry={retryProfile}
-        onLogout={handleLogout}
+        onRetry={
+          retryProfile
+        }
+        onLogout={
+          handleLogout
+        }
       />
     )
   }
 
+
   const dashboardPath =
-    getDashboardPath(profile)
+    getDashboardPath(
+      profile,
+    )
+
 
   if (!dashboardPath) {
     return (
       <AccessDenied
         message="No dashboard is assigned to this account."
-        onLogout={handleLogout}
+        onLogout={
+          handleLogout
+        }
       />
     )
   }
 
+
   const dashboardProps = {
     profile,
-    accessToken: sessionAccessToken,
-    onLogout: handleLogout,
+
+    accessToken:
+      sessionAccessToken,
+
+    onLogout:
+      handleLogout,
   }
+
 
   return (
     <Suspense
       fallback={
-        <PageLoader message="Loading dashboard..." />
+        <PageLoader
+          message="Loading dashboard..."
+        />
       }
     >
       <Routes>
+
         <Route
           path="/"
           element={
             <Navigate
-              to={dashboardPath}
+              to={
+                dashboardPath
+              }
               replace
             />
           }
         />
 
-        {dashboardRoutes.map(
-          ({
-            path,
-            roles,
-            desk,
-            Component,
-          }) => {
-            const roleAllowed =
-              roles.includes(profile.role)
 
-            const deskAllowed =
-              !desk
-              || profile.desk_code === desk
+        {
+          dashboardRoutes.map(
+            ({
+              path,
+              roles,
+              desk,
+              Component,
+            }) => {
+              const roleAllowed =
+                roles.includes(
+                  profile.role,
+                )
 
-            return (
-              <Route
-                key={path}
-                path={path}
-                element={
-                  roleAllowed && deskAllowed
-                    ? (
+              const deskAllowed =
+                !desk
+                || (
+                  profile.desk_code
+                  === desk
+                )
+
+              return (
+                <Route
+                  key={path}
+                  path={path}
+                  element={
+                    roleAllowed
+                      && deskAllowed
+                      ? (
                         <Component
                           {...dashboardProps}
                         />
                       )
-                    : (
+                      : (
                         <Navigate
-                          to={dashboardPath}
+                          to={
+                            dashboardPath
+                          }
                           replace
                         />
                       )
-                }
-              />
-            )
-          },
-        )}
+                  }
+                />
+              )
+            },
+          )
+        }
+
 
         <Route
           path="*"
           element={
             <AccessDenied
               message="This page does not exist or you are not authorized to access it."
-              onLogout={handleLogout}
+              onLogout={
+                handleLogout
+              }
             />
           }
         />
+
       </Routes>
     </Suspense>
   )

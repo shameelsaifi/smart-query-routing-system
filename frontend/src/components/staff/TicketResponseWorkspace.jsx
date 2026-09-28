@@ -11,7 +11,16 @@ import {
 } from '../../services/ticketService'
 
 
-function TicketResponseWorkspace({
+function getResponseText(data) {
+  return (
+    data.final_response_text
+    || data.ai_draft_text
+    || ''
+  )
+}
+
+
+function ResponseSession({
   accessToken,
   ticketNumber,
   onClose,
@@ -57,60 +66,59 @@ function TicketResponseWorkspace({
   ] = useState('')
 
 
-  const applyWorkspaceData = (
-    data,
-  ) => {
-    setResponse(data)
-
-    setResponseText(
-      data.final_response_text
-      || data.ai_draft_text
-      || '',
-    )
-  }
-
-
-  const loadWorkspace = async (
-    signal,
-  ) => {
-    setLoading(true)
-    setErrorMessage('')
-
-    try {
-      const data = await getTicketResponse(
-        accessToken,
-        ticketNumber,
-        signal,
-      )
-
-      if (signal?.aborted) {
-        return
-      }
-
-      applyWorkspaceData(data)
-
-    } catch (error) {
-      if (!signal?.aborted) {
-        setErrorMessage(
-          error.message,
-        )
-      }
-
-    } finally {
-      if (!signal?.aborted) {
-        setLoading(false)
-      }
-    }
-  }
-
+  // ----------------------------------------------------------
+  // INITIAL RESPONSE WORKSPACE
+  // ----------------------------------------------------------
 
   useEffect(() => {
     const controller =
       new AbortController()
 
-    loadWorkspace(
-      controller.signal,
-    )
+    const load = async () => {
+      try {
+        const data =
+          await getTicketResponse(
+            accessToken,
+            ticketNumber,
+            controller.signal,
+          )
+
+        if (
+          controller.signal.aborted
+        ) {
+          return
+        }
+
+        setResponse(
+          data,
+        )
+
+        setResponseText(
+          getResponseText(
+            data,
+          ),
+        )
+
+        setErrorMessage('')
+      } catch (error) {
+        if (
+          !controller.signal.aborted
+        ) {
+          setErrorMessage(
+            error.message
+            || 'Response workspace could not be loaded.',
+          )
+        }
+      } finally {
+        if (
+          !controller.signal.aborted
+        ) {
+          setLoading(false)
+        }
+      }
+    }
+
+    load()
 
     return () => {
       controller.abort()
@@ -121,6 +129,10 @@ function TicketResponseWorkspace({
   ])
 
 
+  // ----------------------------------------------------------
+  // DELIVERY STATUS POLLING
+  // ----------------------------------------------------------
+
   useEffect(() => {
     if (
       response?.delivery_status
@@ -130,22 +142,43 @@ function TicketResponseWorkspace({
     }
 
     let active = true
+    let requestController = null
 
     const refreshDeliveryStatus =
       async () => {
+        if (requestController) {
+          requestController.abort()
+        }
+
+        const controller =
+          new AbortController()
+
+        requestController =
+          controller
+
         try {
           const updated =
             await getTicketResponse(
               accessToken,
               ticketNumber,
+              controller.signal,
             )
 
-          if (!active) {
+          if (
+            !active
+            || controller.signal.aborted
+          ) {
             return
           }
 
-          applyWorkspaceData(
+          setResponse(
             updated,
+          )
+
+          setResponseText(
+            getResponseText(
+              updated,
+            ),
           )
 
           if (
@@ -174,10 +207,17 @@ function TicketResponseWorkspace({
               ),
             )
           }
-
         } catch {
-          // Keep existing UI state.
-          // The next polling cycle may succeed.
+          // A later polling cycle
+          // can refresh the status.
+        } finally {
+          if (
+            requestController
+            === controller
+          ) {
+            requestController =
+              null
+          }
         }
       }
 
@@ -193,6 +233,9 @@ function TicketResponseWorkspace({
       window.clearInterval(
         timer,
       )
+
+      requestController
+        ?.abort()
     }
   }, [
     accessToken,
@@ -201,55 +244,69 @@ function TicketResponseWorkspace({
   ])
 
 
-  const handleSave = async () => {
-    const cleaned =
-      responseText.trim()
+  // ----------------------------------------------------------
+  // SAVE RESPONSE
+  // ----------------------------------------------------------
 
-    if (!cleaned) {
-      setErrorMessage(
-        'Final response cannot be empty.',
-      )
+  const handleSave =
+    async () => {
+      const cleaned =
+        responseText.trim()
 
-      return
-    }
-
-    setSaving(true)
-    setErrorMessage('')
-    setSuccessMessage('')
-
-    try {
-      const updated =
-        await saveTicketResponse(
-          accessToken,
-          ticketNumber,
-          {
-            final_response_text:
-              cleaned,
-
-            expected_revision:
-              response?.revision
-              ?? 0,
-          },
+      if (!cleaned) {
+        setErrorMessage(
+          'Final response cannot be empty.',
         )
 
-      applyWorkspaceData(
-        updated,
-      )
+        return
+      }
 
-      setSuccessMessage(
-        `Response saved successfully. Revision ${updated.revision}.`,
-      )
+      setSaving(true)
+      setErrorMessage('')
+      setSuccessMessage('')
 
-    } catch (error) {
-      setErrorMessage(
-        error.message,
-      )
+      try {
+        const updated =
+          await saveTicketResponse(
+            accessToken,
+            ticketNumber,
+            {
+              final_response_text:
+                cleaned,
 
-    } finally {
-      setSaving(false)
+              expected_revision:
+                response?.revision
+                ?? 0,
+            },
+          )
+
+        setResponse(
+          updated,
+        )
+
+        setResponseText(
+          getResponseText(
+            updated,
+          ),
+        )
+
+        setSuccessMessage(
+          `Response saved successfully. Revision ${updated.revision}.`,
+        )
+      } catch (error) {
+        setErrorMessage(
+          error.message
+          || 'Response could not be saved.',
+        )
+      } finally {
+        setSaving(false)
+      }
     }
-  }
 
+
+  // ----------------------------------------------------------
+  // APPROVE RESPONSE
+  // ----------------------------------------------------------
 
   const handleApprove =
     async () => {
@@ -278,24 +335,33 @@ function TicketResponseWorkspace({
             },
           )
 
-        applyWorkspaceData(
+        setResponse(
           updated,
+        )
+
+        setResponseText(
+          getResponseText(
+            updated,
+          ),
         )
 
         setSuccessMessage(
           'Final response approved. You can now send it to the student.',
         )
-
       } catch (error) {
         setErrorMessage(
-          error.message,
+          error.message
+          || 'Response could not be approved.',
         )
-
       } finally {
         setApproving(false)
       }
     }
 
+
+  // ----------------------------------------------------------
+  // QUEUE GMAIL DELIVERY
+  // ----------------------------------------------------------
 
   const handleQueueDelivery =
     async () => {
@@ -359,20 +425,25 @@ function TicketResponseWorkspace({
         setSuccessMessage(
           'Email queued successfully. SmartQuery will send it automatically.',
         )
-
       } catch (error) {
         setErrorMessage(
-          error.message,
+          error.message
+          || 'Email could not be queued.',
         )
-
       } finally {
         setQueueing(false)
       }
     }
 
 
+  // ----------------------------------------------------------
+  // RESTORE AI DRAFT
+  // ----------------------------------------------------------
+
   const handleUseAiDraft = () => {
-    if (!response?.editable) {
+    if (
+      !response?.editable
+    ) {
       return
     }
 
@@ -386,25 +457,38 @@ function TicketResponseWorkspace({
   }
 
 
+  // ----------------------------------------------------------
+  // LOADING
+  // ----------------------------------------------------------
+
   if (loading) {
     return (
       <div className="mt-4 border border-slate-200 rounded-xl bg-white p-5 text-center">
+
         <div className="inline-block w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
 
         <p className="text-xs text-slate-500 mt-2">
           Loading response workspace...
         </p>
+
       </div>
     )
   }
 
 
+  // ----------------------------------------------------------
+  // LOAD FAILURE
+  // ----------------------------------------------------------
+
   if (!response) {
     return (
       <div className="mt-4 border border-red-200 rounded-xl bg-red-50 p-4">
+
         <p className="text-xs text-red-700">
-          {errorMessage
-          || 'Response workspace unavailable.'}
+          {
+            errorMessage
+            || 'Response workspace unavailable.'
+          }
         </p>
 
         <button
@@ -414,6 +498,7 @@ function TicketResponseWorkspace({
         >
           Close
         </button>
+
       </div>
     )
   }
@@ -428,19 +513,25 @@ function TicketResponseWorkspace({
     || 'NOT_QUEUED'
 
   const queued =
-    deliveryStatus === 'QUEUED'
+    deliveryStatus
+    === 'QUEUED'
 
   const sent =
-    deliveryStatus === 'SENT'
+    deliveryStatus
+    === 'SENT'
 
   const failed =
-    deliveryStatus === 'FAILED'
+    deliveryStatus
+    === 'FAILED'
 
 
   return (
     <div className="mt-4 border border-slate-300 rounded-xl bg-white overflow-hidden">
+
       <div className="px-4 py-3 bg-slate-900 text-white flex flex-wrap justify-between items-center gap-3">
+
         <div>
+
           <h3 className="text-sm font-bold">
             Final Response Workspace
           </h3>
@@ -448,7 +539,9 @@ function TicketResponseWorkspace({
           <p className="text-[10px] text-slate-400 mt-0.5">
             Ticket {ticketNumber}
           </p>
+
         </div>
+
 
         <button
           type="button"
@@ -457,33 +550,49 @@ function TicketResponseWorkspace({
         >
           Close
         </button>
+
       </div>
 
 
       <div className="p-4 space-y-4">
+
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+
           <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5">
+
             <span className="text-[10px] text-slate-400 block">
               Recipient
             </span>
 
             <strong className="text-slate-700 break-all">
-              {response.recipient_email
-              || 'Unavailable'}
+              {
+                response
+                  .recipient_email
+                || 'Unavailable'
+              }
             </strong>
+
           </div>
 
+
           <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5">
+
             <span className="text-[10px] text-slate-400 block">
               Approval
             </span>
 
             <strong className="text-slate-700">
-              {response.approval_status}
+              {
+                response
+                  .approval_status
+              }
             </strong>
+
           </div>
 
+
           <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5">
+
             <span className="text-[10px] text-slate-400 block">
               Delivery
             </span>
@@ -491,7 +600,9 @@ function TicketResponseWorkspace({
             <strong className="text-slate-700">
               {deliveryStatus}
             </strong>
+
           </div>
+
         </div>
 
 
@@ -501,6 +612,7 @@ function TicketResponseWorkspace({
           </div>
         )}
 
+
         {successMessage && (
           <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-800">
             {successMessage}
@@ -509,15 +621,22 @@ function TicketResponseWorkspace({
 
 
         <div>
+
           <div className="flex justify-between items-center gap-3 mb-1.5">
+
             <label className="text-xs font-bold text-slate-700">
               Final Response
             </label>
 
             <span className="text-[10px] text-slate-400">
-              Revision {response.revision}
+              Revision {
+                response
+                  .revision
+              }
             </span>
+
           </div>
+
 
           <textarea
             value={responseText}
@@ -534,11 +653,14 @@ function TicketResponseWorkspace({
             rows={9}
             className="w-full resize-y rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-xs text-slate-800 leading-relaxed outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-100 disabled:text-slate-600"
           />
+
         </div>
 
 
-        {response.ai_draft_text
-          && response.editable && (
+        {
+          response.ai_draft_text
+          && response.editable
+          && (
             <button
               type="button"
               onClick={
@@ -548,14 +670,18 @@ function TicketResponseWorkspace({
             >
               Restore AI Draft
             </button>
-          )}
+          )
+        }
 
 
         {!approved && (
           <div className="flex flex-col sm:flex-row gap-2">
+
             <button
               type="button"
-              onClick={handleSave}
+              onClick={
+                handleSave
+              }
               disabled={
                 saving
                 || approving
@@ -563,12 +689,15 @@ function TicketResponseWorkspace({
               }
               className="flex-1 py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl disabled:opacity-50"
             >
-              {saving
-                ? 'Saving...'
-                : response.response_id
-                  ? 'Save Changes'
-                  : 'Save Final Response'}
+              {
+                saving
+                  ? 'Saving...'
+                  : response.response_id
+                    ? 'Save Changes'
+                    : 'Save Final Response'
+              }
             </button>
+
 
             <button
               type="button"
@@ -582,93 +711,150 @@ function TicketResponseWorkspace({
               }
               className="flex-1 py-2 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl disabled:opacity-50"
             >
-              {approving
-                ? 'Approving...'
-                : 'Approve Final Response'}
+              {
+                approving
+                  ? 'Approving...'
+                  : 'Approve Final Response'
+              }
             </button>
+
           </div>
         )}
 
 
-        {approved
+        {
+          approved
           && !sent
-          && !queued && (
+          && !queued
+          && (
             <div className="space-y-3">
+
               {failed && (
                 <div className="bg-red-50 border border-red-200 rounded-xl p-3">
+
                   <p className="text-xs font-bold text-red-800">
                     Previous delivery failed
                   </p>
 
                   <p className="text-[11px] text-red-700 mt-1">
-                    {response.failure_reason
-                    || (
-                      'Confirm that the student did not receive '
-                      + 'the email before retrying.'
-                    )}
+                    {
+                      response.failure_reason
+                      || (
+                        'Confirm that the student did not receive '
+                        + 'the email before retrying.'
+                      )
+                    }
                   </p>
+
                 </div>
               )}
+
 
               <button
                 type="button"
                 onClick={
                   handleQueueDelivery
                 }
-                disabled={queueing}
+                disabled={
+                  queueing
+                }
                 className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl disabled:opacity-50"
               >
-                {queueing
-                  ? 'Queueing Email...'
-                  : failed
-                    ? 'Retry Email Delivery'
-                    : 'Send Approved Response'}
+                {
+                  queueing
+                    ? 'Queueing Email...'
+                    : failed
+                      ? 'Retry Email Delivery'
+                      : 'Send Approved Response'
+                }
               </button>
 
+
               <p className="text-[10px] text-slate-500 text-center">
-                The email will be sent from the SmartQuery
-                support mailbox through the automated
+                The email will be sent
+                from the SmartQuery support
+                mailbox through the automated
                 delivery workflow.
               </p>
+
             </div>
-          )}
+          )
+        }
 
 
         {approved && queued && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+
             <p className="text-xs font-bold text-amber-800">
               Queued for delivery
             </p>
 
             <p className="text-[11px] text-amber-700 mt-1">
-              SmartQuery is waiting for the automated
-              Gmail workflow to send this response.
-              Delivery status refreshes automatically.
+              SmartQuery is waiting for
+              the automated Gmail workflow
+              to send this response.
+              Delivery status refreshes
+              automatically.
             </p>
+
           </div>
         )}
 
 
         {sent && (
           <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3">
+
             <p className="text-xs font-bold text-emerald-800">
               Response delivered successfully
             </p>
 
-            {response.sent_at && (
-              <p className="text-[11px] text-emerald-700 mt-1">
-                Sent at:{' '}
-                {new Date(
-                  response.sent_at,
-                ).toLocaleString()}
-              </p>
-            )}
+            {
+              response.sent_at
+              && (
+                <p className="text-[11px] text-emerald-700 mt-1">
+                  Sent at:{' '}
+                  {
+                    new Date(
+                      response
+                        .sent_at,
+                    ).toLocaleString()
+                  }
+                </p>
+              )
+            }
+
           </div>
         )}
+
       </div>
+
     </div>
   )
 }
 
 
-export default TicketResponseWorkspace
+export default function TicketResponseWorkspace({
+  accessToken,
+  ticketNumber,
+  onClose,
+}) {
+  return (
+    <ResponseSession
+      key={
+        JSON.stringify([
+          accessToken,
+          ticketNumber,
+        ])
+      }
+      accessToken={
+        accessToken
+      }
+      ticketNumber={
+        ticketNumber
+      }
+      onClose={
+        onClose
+      }
+    />
+  )
+}

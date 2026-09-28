@@ -33,8 +33,24 @@ from app.services.announcement_service import (
     get_announcements,
 )
 
+from app.api.v1.endpoints.admin_users import (
+    router as admin_users_router,
+)
+
+from app.api.v1.endpoints.admin_management import (
+    router as admin_management_router,
+)
+
 
 router = APIRouter()
+
+router.include_router(
+    admin_users_router
+)
+
+router.include_router(
+    admin_management_router
+)
 
 
 admin_dependency = require_role(
