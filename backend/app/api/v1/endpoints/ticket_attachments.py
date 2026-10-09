@@ -20,8 +20,8 @@ from app.core.rbac import require_role
 from app.services.attachment_storage_service import MAX_ATTACHMENT_BYTES
 from app.services.ticket_attachment_service import (
     check_attachment_access,
-    download_student_attachment,
-    get_student_attachments,
+    download_accessible_attachment,
+    get_accessible_attachments,
     remove_student_attachment,
     upload_student_attachment,
 )
@@ -93,15 +93,24 @@ async def read_bounded_body(request: Request) -> bytes:
 
 @router.get(
     "",
-    summary="List attachments for the current student's ticket",
+    summary="List attachments for an authorized ticket",
 )
 def list_attachments(
     response: Response,
     ticket_number: TicketNumber,
-    current_user: dict[str, Any] = Depends(require_role("STUDENT")),
+    current_user: dict[str, Any] = Depends(
+        require_role(
+            "STUDENT",
+            "DEPARTMENT_STAFF",
+            "INSTRUCTOR",
+        )
+    ),
 ) -> dict[str, Any]:
     response.headers["Cache-Control"] = "no-store"
-    return get_student_attachments(current_user, ticket_number)
+    return get_accessible_attachments(
+        current_user,
+        ticket_number,
+    )
 
 
 @router.put(
@@ -137,7 +146,7 @@ async def upload_attachment(
 ) -> dict[str, Any]:
     response.headers["Cache-Control"] = "no-store"
 
-    # Authorize the ticket before reading the uploaded body.
+    # Authorize the student-owned draft before reading the uploaded body.
     await run_in_threadpool(
         check_attachment_access,
         current_user,
@@ -208,15 +217,21 @@ async def upload_attachment(
 
 @router.get(
     "/{attachment_id}/download",
-    summary="Download an attachment belonging to the current student",
+    summary="Download an attachment from an authorized ticket",
     response_class=Response,
 )
 def download_attachment(
     ticket_number: TicketNumber,
     attachment_id: UUID4,
-    current_user: dict[str, Any] = Depends(require_role("STUDENT")),
+    current_user: dict[str, Any] = Depends(
+        require_role(
+            "STUDENT",
+            "DEPARTMENT_STAFF",
+            "INSTRUCTOR",
+        )
+    ),
 ) -> Response:
-    attachment, content = download_student_attachment(
+    attachment, content = download_accessible_attachment(
         current_user,
         ticket_number,
         attachment_id,

@@ -9,7 +9,9 @@ from app.schemas.student_ticket_detail import (
     StudentTicketDetailFilters,
     StudentTicketDetails,
 )
-from app.services.ticket_access_service import load_ticket_actor
+from app.services.ticket_access_service import (
+    load_ticket_actor,
+)
 
 
 HISTORY_PAGE_SIZE = 20
@@ -31,7 +33,8 @@ def get_student_ticket_details(
             row = db.execute(
                 text(
                     """
-                    WITH owned_ticket AS MATERIALIZED (
+                    WITH owned_ticket
+                    AS MATERIALIZED (
                         SELECT
                             t.ticket_id,
                             t.ticket_number,
@@ -59,37 +62,58 @@ def get_student_ticket_details(
                                 assignment.department_id,
                                 assignment.desk_id
 
-                            FROM public.query_assignments assignment
+                            FROM
+                                public.query_assignments
+                                assignment
 
                             WHERE
-                                assignment.ticket_id = t.ticket_id
-                                AND assignment.is_current = TRUE
+                                assignment.ticket_id =
+                                    t.ticket_id
+
+                                AND
+                                assignment.is_current =
+                                    TRUE
 
                             ORDER BY
-                                assignment.assigned_at DESC,
-                                assignment.assignment_id DESC
+                                assignment.assigned_at
+                                    DESC,
+
+                                assignment.assignment_id
+                                    DESC
 
                             LIMIT 1
                         ) qa
                           ON TRUE
 
-                        LEFT JOIN public.accounts_desks desk
-                          ON desk.desk_id = COALESCE(
-                                qa.desk_id,
-                                t.routed_desk_id
+                        LEFT JOIN
+                            public.accounts_desks
+                            desk
+
+                          ON desk.desk_id =
+                             COALESCE(
+                                 qa.desk_id,
+                                 t.routed_desk_id
                              )
 
-                        LEFT JOIN public.departments d
-                          ON d.department_id = COALESCE(
-                                qa.department_id,
-                                desk.department_id
+                        LEFT JOIN
+                            public.departments d
+
+                          ON d.department_id =
+                             COALESCE(
+                                 qa.department_id,
+                                 desk.department_id
                              )
 
                         WHERE
-                            t.student_id = CAST(
-                                :student_id AS UUID
-                            )
-                            AND t.ticket_number = :ticket_number
+                            t.student_id =
+                                CAST(
+                                    :student_id
+                                    AS UUID
+                                )
+
+                            AND
+                            t.ticket_number =
+                                :ticket_number
                     ),
 
                     events AS (
@@ -100,54 +124,128 @@ def get_student_ticket_details(
                             h.new_status,
                             h.changed_at
 
-                        FROM public.query_status_history h
+                        FROM
+                            public.query_status_history
+                            h
 
                         JOIN owned_ticket t
-                          ON t.ticket_id = h.ticket_id
+                          ON t.ticket_id =
+                             h.ticket_id
 
                         WHERE (
                             CAST(
-                                :before_sequence AS BIGINT
+                                :before_sequence
+                                AS BIGINT
                             ) IS NULL
 
-                            OR h.event_sequence
-                               < CAST(
-                                   :before_sequence AS BIGINT
-                                 )
+                            OR
+                            h.event_sequence
+                                < CAST(
+                                    :before_sequence
+                                    AS BIGINT
+                                )
                         )
 
                         ORDER BY
-                            h.event_sequence DESC
+                            h.event_sequence
+                                DESC
 
                         LIMIT :event_limit
                     )
 
                     SELECT
-                        to_jsonb(t) AS ticket,
+                        to_jsonb(t)
+                            AS ticket,
+
+                        (
+                            SELECT
+                                jsonb_build_object(
+                                    'response_id',
+                                    r.response_id::text,
+
+                                    'final_response_text',
+                                    r.final_response_text,
+
+                                    'responder_name',
+                                    responder.full_name,
+
+                                    'sent_at',
+                                    r.sent_at
+                                )
+
+                            FROM
+                                public.responses r
+
+                            LEFT JOIN
+                                public.users responder
+
+                              ON responder.user_id =
+                                 r.responder_id
+
+                            WHERE
+                                r.ticket_id =
+                                    t.ticket_id
+
+                                AND
+                                r.response_type =
+                                    'FINAL'
+
+                                AND
+                                r.approval_status =
+                                    'APPROVED'
+
+                                AND
+                                r.delivery_status =
+                                    'SENT'
+
+                                AND
+                                r.final_response_text
+                                    IS NOT NULL
+
+                                AND
+                                BTRIM(
+                                    r.final_response_text
+                                ) <> ''
+
+                                AND
+                                r.sent_at
+                                    IS NOT NULL
+
+                            ORDER BY
+                                r.sent_at DESC,
+                                r.created_at DESC,
+                                r.response_id DESC
+
+                            LIMIT 1
+                        ) AS final_response,
 
                         COALESCE(
                             (
-                                SELECT jsonb_agg(
-                                    jsonb_build_object(
-                                        'history_id',
-                                        e.history_id::text,
+                                SELECT
+                                    jsonb_agg(
+                                        jsonb_build_object(
+                                            'history_id',
+                                            e.history_id
+                                                ::text,
 
-                                        'sequence',
-                                        e.event_sequence::text,
+                                            'sequence',
+                                            e.event_sequence
+                                                ::text,
 
-                                        'previous_status',
-                                        e.previous_status,
+                                            'previous_status',
+                                            e.previous_status,
 
-                                        'new_status',
-                                        e.new_status,
+                                            'new_status',
+                                            e.new_status,
 
-                                        'changed_at',
-                                        e.changed_at
+                                            'changed_at',
+                                            e.changed_at
+                                        )
+
+                                        ORDER BY
+                                            e.event_sequence
+                                                DESC
                                     )
-
-                                    ORDER BY
-                                        e.event_sequence DESC
-                                )
 
                                 FROM events e
                             ),
@@ -158,10 +256,19 @@ def get_student_ticket_details(
                     """
                 ),
                 {
-                    "student_id": actor["user_id"],
-                    "ticket_number": ticket_number,
-                    "before_sequence": filters.before_sequence,
-                    "event_limit": HISTORY_PAGE_SIZE + 1,
+                    "student_id": (
+                        actor["user_id"]
+                    ),
+                    "ticket_number": (
+                        ticket_number
+                    ),
+                    "before_sequence": (
+                        filters.before_sequence
+                    ),
+                    "event_limit": (
+                        HISTORY_PAGE_SIZE
+                        + 1
+                    ),
                 },
             ).mappings().one_or_none()
 
@@ -169,35 +276,60 @@ def get_student_ticket_details(
                 raise HTTPException(
                     status_code=404,
                     detail=(
-                        "Ticket not found or not accessible."
+                        "Ticket not found or "
+                        "not accessible."
                     ),
                 )
 
-            events = row["history"]
+            events = row[
+                "history"
+            ]
 
             visible_events = (
-                events[:HISTORY_PAGE_SIZE]
+                events[
+                    :HISTORY_PAGE_SIZE
+                ]
             )
 
             next_before = (
-                visible_events[-1]["sequence"]
-                if len(events) > HISTORY_PAGE_SIZE
+                visible_events[-1][
+                    "sequence"
+                ]
+                if (
+                    len(events)
+                    > HISTORY_PAGE_SIZE
+                )
                 else None
             )
 
-            return StudentTicketDetails.model_validate(
-                {
-                    "ticket": row["ticket"],
-                    "history": visible_events,
-                    "next_before_sequence": next_before,
-                }
+            return (
+                StudentTicketDetails
+                .model_validate(
+                    {
+                        "ticket": (
+                            row["ticket"]
+                        ),
+                        "final_response": (
+                            row[
+                                "final_response"
+                            ]
+                        ),
+                        "history": (
+                            visible_events
+                        ),
+                        "next_before_sequence": (
+                            next_before
+                        ),
+                    }
+                )
             )
 
     except SQLAlchemyError as exc:
         raise HTTPException(
             status_code=503,
             detail=(
-                "Ticket details are temporarily unavailable. "
+                "Ticket details are "
+                "temporarily unavailable. "
                 "Please try again."
             ),
         ) from exc

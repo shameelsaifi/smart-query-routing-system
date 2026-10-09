@@ -7,6 +7,17 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.core.database import SessionLocal
 
 
+OPEN_STATUSES = (
+    "PENDING",
+    "CLASSIFIED",
+    "ROUTED",
+    "IN_PROGRESS",
+    "NEEDS_INFORMATION",
+    "ESCALATED",
+    "PENDING_APPROVAL",
+)
+
+
 def get_admin_dashboard_stats(
     current_user: dict[str, Any],
 ) -> dict[str, Any]:
@@ -49,9 +60,30 @@ def get_admin_dashboard_stats(
                                 'CLOSED'
                             )
                             AND sla_due_at IS NOT NULL
-                            AND sla_due_at <= NOW()
+                            AND sla_due_at < NOW()
                         )::int
                             AS overdue_queries,
+
+                        COUNT(*) FILTER (
+                            WHERE status NOT IN (
+                                'DRAFT',
+                                'RESOLVED',
+                                'CLOSED'
+                            )
+                            AND sla_due_at IS NOT NULL
+                        )::int
+                            AS sla_known_queries,
+
+                        COUNT(*) FILTER (
+                            WHERE status NOT IN (
+                                'DRAFT',
+                                'RESOLVED',
+                                'CLOSED'
+                            )
+                            AND sla_due_at IS NOT NULL
+                            AND sla_due_at >= NOW()
+                        )::int
+                            AS within_sla_queries,
 
                         ROUND(
                             COALESCE(
@@ -68,8 +100,7 @@ def get_admin_dashboard_stats(
                                     ) / 3600
                                 ) FILTER (
                                     WHERE status = 'RESOLVED'
-                                      AND resolved_at
-                                          IS NOT NULL
+                                      AND resolved_at IS NOT NULL
                                 ),
                                 0
                             )::numeric,
@@ -80,9 +111,7 @@ def get_admin_dashboard_stats(
                         (
                             SELECT
                                 COUNT(*)::int
-
                             FROM public.users
-
                             WHERE is_active = TRUE
                         )
                             AS active_users,
@@ -90,11 +119,23 @@ def get_admin_dashboard_stats(
                         (
                             SELECT
                                 COUNT(*)::int
+                            FROM public.departments
+                            WHERE is_active = TRUE
+                        )
+                            AS active_departments,
 
+                        (
+                            SELECT
+                                COUNT(*)::int
+                            FROM public.departments
+                        )
+                            AS total_departments,
+
+                        (
+                            SELECT
+                                COUNT(*)::int
                             FROM public.escalations
-
-                            WHERE escalation_status =
-                                  'OPEN'
+                            WHERE escalation_status = 'OPEN'
                         )
                             AS open_escalations
 
@@ -124,8 +165,9 @@ def get_admin_dashboard_stats(
                             WHEN 'IN_PROGRESS' THEN 4
                             WHEN 'NEEDS_INFORMATION' THEN 5
                             WHEN 'ESCALATED' THEN 6
-                            WHEN 'RESOLVED' THEN 7
-                            WHEN 'CLOSED' THEN 8
+                            WHEN 'PENDING_APPROVAL' THEN 7
+                            WHEN 'RESOLVED' THEN 8
+                            WHEN 'CLOSED' THEN 9
                             ELSE 99
                         END,
                         status
@@ -136,94 +178,170 @@ def get_admin_dashboard_stats(
             department_rows = db.execute(
                 text(
                     """
-                    SELECT
-                        d.department_id::text
-                            AS department_id,
-
-                        d.department_name,
-
-                        COUNT(t.ticket_id) FILTER (
-                            WHERE t.status <> 'DRAFT'
-                        )::int
-                            AS total_queries,
-
-                        COUNT(t.ticket_id) FILTER (
-                            WHERE t.status NOT IN (
-                                'DRAFT',
-                                'RESOLVED',
-                                'CLOSED'
-                            )
-                        )::int
-                            AS active_queries,
-
-                        COUNT(t.ticket_id) FILTER (
-                            WHERE t.status = 'ESCALATED'
-                        )::int
-                            AS escalated_queries,
-
-                        COUNT(t.ticket_id) FILTER (
-                            WHERE t.status = 'RESOLVED'
-                        )::int
-                            AS resolved_queries,
-
-                        COUNT(t.ticket_id) FILTER (
-                            WHERE t.status NOT IN (
-                                'DRAFT',
-                                'RESOLVED',
-                                'CLOSED'
-                            )
-                            AND t.sla_due_at
-                                IS NOT NULL
-                            AND t.sla_due_at
-                                <= NOW()
-                        )::int
-                            AS overdue_queries,
-
-                        ROUND(
+                    WITH ticket_scope AS (
+                        SELECT
+                            t.ticket_id,
+                            t.status,
+                            t.sla_due_at,
+                            t.resolved_at,
+                            t.submitted_at,
+                            t.created_at,
                             COALESCE(
-                                AVG(
-                                    EXTRACT(
-                                        EPOCH FROM (
-                                            t.resolved_at
-                                            -
-                                            COALESCE(
-                                                t.submitted_at,
-                                                t.created_at
+                                desk.department_id,
+                                owner.department_id
+                            ) AS department_id
+
+                        FROM public.tickets t
+
+                        LEFT JOIN public.accounts_desks desk
+                          ON desk.desk_id = t.routed_desk_id
+
+                        LEFT JOIN public.users owner
+                          ON owner.user_id = t.assigned_officer_id
+
+                        WHERE t.status <> 'DRAFT'
+                    ),
+                    active_departments AS (
+                        SELECT
+                            d.department_id,
+                            d.department_name
+
+                        FROM public.departments d
+
+                        WHERE d.is_active = TRUE
+                    ),
+                    department_stats AS (
+                        SELECT
+                            d.department_id::text AS department_id,
+                            d.department_name,
+
+                            COUNT(ts.ticket_id)::int AS total_queries,
+
+                            COUNT(ts.ticket_id) FILTER (
+                                WHERE ts.status NOT IN (
+                                    'RESOLVED',
+                                    'CLOSED'
+                                )
+                            )::int AS active_queries,
+
+                            COUNT(ts.ticket_id) FILTER (
+                                WHERE ts.status = 'ESCALATED'
+                            )::int AS escalated_queries,
+
+                            COUNT(ts.ticket_id) FILTER (
+                                WHERE ts.status = 'RESOLVED'
+                            )::int AS resolved_queries,
+
+                            COUNT(ts.ticket_id) FILTER (
+                                WHERE ts.status NOT IN (
+                                    'RESOLVED',
+                                    'CLOSED'
+                                )
+                                AND ts.sla_due_at IS NOT NULL
+                                AND ts.sla_due_at < NOW()
+                            )::int AS overdue_queries,
+
+                            ROUND(
+                                COALESCE(
+                                    AVG(
+                                        EXTRACT(
+                                            EPOCH FROM (
+                                                ts.resolved_at
+                                                -
+                                                COALESCE(
+                                                    ts.submitted_at,
+                                                    ts.created_at
+                                                )
                                             )
-                                        )
-                                    ) / 3600
-                                ) FILTER (
-                                    WHERE t.status =
-                                          'RESOLVED'
-                                      AND t.resolved_at
-                                          IS NOT NULL
-                                ),
-                                0
-                            )::numeric,
-                            2
-                        )
-                            AS avg_resolution_hours
+                                        ) / 3600
+                                    ) FILTER (
+                                        WHERE ts.status = 'RESOLVED'
+                                          AND ts.resolved_at IS NOT NULL
+                                    ),
+                                    0
+                                )::numeric,
+                                2
+                            ) AS avg_resolution_hours
 
-                    FROM public.departments d
+                        FROM active_departments d
 
-                    LEFT JOIN
-                        public.query_assignments qa
-                      ON qa.department_id =
-                         d.department_id
-                     AND qa.is_current = TRUE
+                        LEFT JOIN ticket_scope ts
+                          ON ts.department_id = d.department_id
 
-                    LEFT JOIN public.tickets t
-                      ON t.ticket_id =
-                         qa.ticket_id
+                        GROUP BY
+                            d.department_id,
+                            d.department_name
+                    ),
+                    unassigned_stats AS (
+                        SELECT
+                            NULL::text AS department_id,
+                            'Unassigned / Unknown'::text AS department_name,
 
-                    WHERE d.is_active = TRUE
+                            COUNT(ts.ticket_id)::int AS total_queries,
 
-                    GROUP BY
-                        d.department_id,
-                        d.department_name
+                            COUNT(ts.ticket_id) FILTER (
+                                WHERE ts.status NOT IN (
+                                    'RESOLVED',
+                                    'CLOSED'
+                                )
+                            )::int AS active_queries,
+
+                            COUNT(ts.ticket_id) FILTER (
+                                WHERE ts.status = 'ESCALATED'
+                            )::int AS escalated_queries,
+
+                            COUNT(ts.ticket_id) FILTER (
+                                WHERE ts.status = 'RESOLVED'
+                            )::int AS resolved_queries,
+
+                            COUNT(ts.ticket_id) FILTER (
+                                WHERE ts.status NOT IN (
+                                    'RESOLVED',
+                                    'CLOSED'
+                                )
+                                AND ts.sla_due_at IS NOT NULL
+                                AND ts.sla_due_at < NOW()
+                            )::int AS overdue_queries,
+
+                            ROUND(
+                                COALESCE(
+                                    AVG(
+                                        EXTRACT(
+                                            EPOCH FROM (
+                                                ts.resolved_at
+                                                -
+                                                COALESCE(
+                                                    ts.submitted_at,
+                                                    ts.created_at
+                                                )
+                                            )
+                                        ) / 3600
+                                    ) FILTER (
+                                        WHERE ts.status = 'RESOLVED'
+                                          AND ts.resolved_at IS NOT NULL
+                                    ),
+                                    0
+                                )::numeric,
+                                2
+                            ) AS avg_resolution_hours
+
+                        FROM ticket_scope ts
+
+                        WHERE ts.department_id IS NULL
+                    )
+
+                    SELECT *
+                    FROM department_stats
+
+                    UNION ALL
+
+                    SELECT *
+                    FROM unassigned_stats
+                    WHERE total_queries > 0
 
                     ORDER BY
-                        d.department_name
+                        active_queries DESC,
+                        department_name
                     """
                 )
             ).mappings().all()
@@ -276,19 +394,15 @@ def get_admin_dashboard_stats(
                     FROM public.escalations e
 
                     JOIN public.tickets t
-                      ON t.ticket_id =
-                         e.ticket_id
+                      ON t.ticket_id = e.ticket_id
 
                     LEFT JOIN public.departments d
-                      ON d.department_id =
-                         e.department_id
+                      ON d.department_id = e.department_id
 
                     JOIN public.users target_user
-                      ON target_user.user_id =
-                         e.escalated_to_user_id
+                      ON target_user.user_id = e.escalated_to_user_id
 
-                    WHERE e.escalation_status =
-                          'OPEN'
+                    WHERE e.escalation_status = 'OPEN'
 
                     ORDER BY
                         e.escalated_at DESC,
@@ -300,18 +414,22 @@ def get_admin_dashboard_stats(
             metric_data = dict(metrics)
 
             total_queries = int(
-                metric_data[
-                    "total_queries"
-                ] or 0
+                metric_data["total_queries"] or 0
             )
 
             resolved_queries = int(
-                metric_data[
-                    "resolved_queries"
-                ] or 0
+                metric_data["resolved_queries"] or 0
             )
 
-            resolution_rate = (
+            sla_known_queries = int(
+                metric_data["sla_known_queries"] or 0
+            )
+
+            within_sla_queries = int(
+                metric_data["within_sla_queries"] or 0
+            )
+
+            metric_data["resolution_rate"] = (
                 round(
                     (
                         resolved_queries
@@ -323,29 +441,34 @@ def get_admin_dashboard_stats(
                 else 0.0
             )
 
-            metric_data[
-                "resolution_rate"
-            ] = resolution_rate
+            metric_data["sla_compliance_percent"] = (
+                round(
+                    (
+                        within_sla_queries
+                        / sla_known_queries
+                    ) * 100,
+                    2,
+                )
+                if sla_known_queries > 0
+                else None
+            )
 
             return {
                 "metrics": metric_data,
 
                 "status_counts": [
                     dict(row)
-                    for row
-                    in status_rows
+                    for row in status_rows
                 ],
 
                 "department_stats": [
                     dict(row)
-                    for row
-                    in department_rows
+                    for row in department_rows
                 ],
 
                 "open_escalations": [
                     dict(row)
-                    for row
-                    in escalation_rows
+                    for row in escalation_rows
                 ],
             }
 

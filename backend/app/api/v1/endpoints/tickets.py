@@ -38,6 +38,11 @@ from app.schemas.ticket import (
     TicketCreateResponse,
 )
 
+from app.services.admin_escalation_service import (
+    get_admin_escalation_options,
+    get_admin_escalation_review,
+    perform_admin_escalation_action,
+)
 from app.services.student_ticket_detail_service import (
     get_student_ticket_details,
 )
@@ -69,7 +74,7 @@ router.include_router(
     ticket_attachments_router
 )
 
-# Staff / Instructor response workspace routes
+# Staff / Instructor / HOD response workspace routes
 router.include_router(
     ticket_responses_router
 )
@@ -192,8 +197,8 @@ def start_assigned_ticket(
 @router.patch(
     "/{ticket_number}/resolve",
     summary=(
-        "Resolve an assigned ticket "
-        "after successful final delivery"
+        "Resolve a ticket after successful "
+        "final delivery"
     ),
 )
 def resolve_assigned_ticket(
@@ -202,12 +207,74 @@ def resolve_assigned_ticket(
         require_role(
             "DEPARTMENT_STAFF",
             "INSTRUCTOR",
+            "HOD",
         )
     ),
 ) -> dict[str, Any]:
     return resolve_ticket(
         ticket_number=ticket_number,
         current_user=current_user,
+    )
+
+
+@router.get(
+    "/admin/escalation-options",
+    summary=(
+        "Get active staff choices for "
+        "Admin escalation reassignment"
+    ),
+)
+def admin_escalation_options(
+    current_user: dict[str, Any] = Depends(
+        require_role("ADMIN")
+    ),
+) -> dict[str, Any]:
+    return get_admin_escalation_options(
+        current_user
+    )
+
+
+@router.get(
+    "/{ticket_number}/admin-escalation-review",
+    summary=(
+        "Get the active Admin escalation "
+        "for a query"
+    ),
+)
+def admin_escalation_review(
+    ticket_number: str,
+    current_user: dict[str, Any] = Depends(
+        require_role("ADMIN")
+    ),
+) -> dict[str, Any]:
+    return get_admin_escalation_review(
+        ticket_number,
+        current_user,
+    )
+
+
+@router.patch(
+    "/{ticket_number}/admin-action",
+    summary=(
+        "Admin escalation actions: "
+        "Reassign or Override"
+    ),
+)
+def perform_admin_action(
+    ticket_number: str,
+    action: str,
+    new_officer_id: str | None = None,
+    reason: str | None = None,
+    current_user: dict[str, Any] = Depends(
+        require_role("ADMIN")
+    ),
+) -> dict[str, Any]:
+    return perform_admin_escalation_action(
+        ticket_number,
+        action,
+        current_user,
+        new_officer_id=new_officer_id,
+        reason=reason,
     )
 
 
@@ -230,14 +297,15 @@ def get_hod_dashboard(
 @router.patch(
     "/{ticket_number}/hod-action",
     summary=(
-        "HOD actions: Approve, "
-        "Reject, or Reassign"
+        "HOD actions: Approve, Reject, Reassign, "
+        "Override, or Escalate to Admin"
     ),
 )
 def perform_hod_action(
     ticket_number: str,
     action: str,
     new_officer_id: str | None = None,
+    reason: str | None = None,
     current_user: dict[str, Any] = Depends(
         require_role("HOD")
     ),
@@ -246,6 +314,7 @@ def perform_hod_action(
         ticket_number=ticket_number,
         action=action,
         new_officer_id=new_officer_id,
+        reason=reason,
         current_user=current_user,
     )
 

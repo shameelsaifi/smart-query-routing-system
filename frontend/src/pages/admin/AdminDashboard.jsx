@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useState,
@@ -18,6 +19,16 @@ import {
   getAdminAnnouncements,
   getAdminDashboard,
 } from '../../services/adminDashboardService'
+
+import {
+  getAdminIntegrationStatus,
+} from '../../services/adminIntegrationService'
+
+import {
+  getAdminEscalationOptions,
+  getAdminEscalationReview,
+  performAdminEscalationAction,
+} from '../../services/adminEscalationService'
 
 import {
   createAdminUser,
@@ -729,11 +740,17 @@ function OverviewPage({
         />
 
         <MetricCard
-          title="Departments"
+          title="Active Departments"
           value={
-            departments.length
+            numberOf(
+              metrics.active_departments
+              ?? departments.filter(
+                (department) =>
+                  department.department_id,
+              ).length,
+            )
           }
-          subtitle="Department workload"
+          subtitle="Available for routing and access"
           symbol="D"
           tone="violet"
         />
@@ -941,6 +958,11 @@ function QueriesPage({
   })
 
   const [
+    searchInput,
+    setSearchInput,
+  ] = useState('')
+
+  const [
     search,
     setSearch,
   ] = useState('')
@@ -974,6 +996,76 @@ function QueriesPage({
     errorMessage,
     setErrorMessage,
   ] = useState('')
+
+  const [
+    reviewTicketNumber,
+    setReviewTicketNumber,
+  ] = useState('')
+
+  const [
+    reviewData,
+    setReviewData,
+  ] = useState(null)
+
+  const [
+    reviewLoading,
+    setReviewLoading,
+  ] = useState(false)
+
+  const [
+    escalationOptions,
+    setEscalationOptions,
+  ] = useState([])
+
+  const [
+    selectedOfficerId,
+    setSelectedOfficerId,
+  ] = useState('')
+
+  const [
+    reassignReason,
+    setReassignReason,
+  ] = useState('')
+
+  const [
+    overrideReason,
+    setOverrideReason,
+  ] = useState('')
+
+  const [
+    actionLoading,
+    setActionLoading,
+  ] = useState('')
+
+  const [
+    actionFeedback,
+    setActionFeedback,
+  ] = useState({
+    action: '',
+    type: '',
+    message: '',
+  })
+
+
+  useEffect(() => {
+    const timer =
+      window.setTimeout(
+        () => {
+          setSearch(
+            searchInput.trim(),
+          )
+        },
+        450,
+      )
+
+    return () => {
+      window.clearTimeout(
+        timer,
+      )
+    }
+  }, [
+    searchInput,
+  ])
 
 
   const loadQueries =
@@ -1071,19 +1163,232 @@ function QueriesPage({
             controller.signal,
           )
         },
-        200,
+        0,
       )
 
     return () => {
       window.clearTimeout(
         timer,
       )
-
       controller.abort()
     }
   }, [
     loadQueries,
   ])
+
+
+  const resetReviewState = () => {
+    setReviewData(null)
+    setSelectedOfficerId('')
+    setReassignReason('')
+    setOverrideReason('')
+    setActionFeedback({
+      action: '',
+      type: '',
+      message: '',
+    })
+  }
+
+
+  const toggleAdminReview =
+    async (ticket) => {
+      const number =
+        ticket.ticket_number
+
+      if (
+        reviewTicketNumber
+        === number
+      ) {
+        setReviewTicketNumber('')
+        resetReviewState()
+
+        return
+      }
+
+      setReviewTicketNumber(
+        number,
+      )
+      resetReviewState()
+      setReviewLoading(true)
+
+      try {
+        const [
+          review,
+          optionData,
+        ] = await Promise.all([
+          getAdminEscalationReview(
+            accessToken,
+            number,
+          ),
+
+          getAdminEscalationOptions(
+            accessToken,
+          ),
+        ])
+
+        setReviewData(
+          review,
+        )
+
+        setEscalationOptions(
+          Array.isArray(
+            optionData?.officers,
+          )
+            ? optionData.officers
+            : [],
+        )
+      } catch (error) {
+        setActionFeedback({
+          action: 'REVIEW',
+          type: 'error',
+          message:
+            error.message
+            || 'Admin escalation review could not be loaded.',
+        })
+      } finally {
+        setReviewLoading(false)
+      }
+    }
+
+
+  const runAdminAction =
+    async (
+      ticket,
+      action,
+    ) => {
+      const number =
+        ticket.ticket_number
+
+      const isReassign =
+        action === 'REASSIGN'
+
+      const reason =
+        (
+          isReassign
+            ? reassignReason
+            : overrideReason
+        ).trim()
+
+      if (
+        reason.length < 5
+      ) {
+        setActionFeedback({
+          action,
+          type: 'error',
+          message:
+            'Enter a decision reason of at least 5 characters.',
+        })
+
+        return
+      }
+
+      if (
+        reason.length > 500
+      ) {
+        setActionFeedback({
+          action,
+          type: 'error',
+          message:
+            'Decision reason cannot exceed 500 characters.',
+        })
+
+        return
+      }
+
+      if (
+        isReassign
+        && !selectedOfficerId
+      ) {
+        setActionFeedback({
+          action,
+          type: 'error',
+          message:
+            'Select a staff member before reassignment.',
+        })
+
+        return
+      }
+
+      const confirmed =
+        window.confirm(
+          isReassign
+            ? `Reassign ${number} and close the active Admin escalation?`
+            : `Override the escalation decision for ${number} and return it to the current officer?`,
+        )
+
+      if (!confirmed) {
+        return
+      }
+
+      setActionLoading(
+        `${number}-${action}`,
+      )
+
+      setActionFeedback({
+        action,
+        type: '',
+        message: '',
+      })
+
+      try {
+        const result =
+          await performAdminEscalationAction(
+            accessToken,
+            number,
+            {
+              action,
+              new_officer_id:
+                isReassign
+                  ? selectedOfficerId
+                  : '',
+              reason,
+            },
+          )
+
+        setActionFeedback({
+          action,
+          type: 'success',
+          message:
+            isReassign
+              ? `${number} reassigned successfully${result?.assigned_officer_name ? ` to ${result.assigned_officer_name}` : ''}.`
+              : `${number} override recorded. The current officer can continue working on the query.`,
+        })
+
+        window.setTimeout(
+          () => {
+            setReviewTicketNumber('')
+            resetReviewState()
+            void loadQueries()
+          },
+          1200,
+        )
+      } catch (error) {
+        setActionFeedback({
+          action,
+          type: 'error',
+          message:
+            error.message
+            || 'Admin escalation action could not be completed.',
+        })
+      } finally {
+        setActionLoading('')
+      }
+    }
+
+
+  const firstVisible =
+    data.total === 0
+      ? 0
+      : (
+        (data.page - 1) * 20
+        + 1
+      )
+
+  const lastVisible =
+    Math.min(
+      data.page * 20,
+      data.total,
+    )
 
 
   return (
@@ -1106,7 +1411,7 @@ function QueriesPage({
         <MetricCard
           title="Current Page"
           value={data.page}
-          subtitle={`20 records per page`}
+          subtitle="20 records per page"
           symbol="#"
           tone="violet"
         />
@@ -1138,10 +1443,10 @@ function QueriesPage({
 
             <input
               type="search"
-              value={search}
+              value={searchInput}
               onChange={
                 (event) => {
-                  setSearch(
+                  setSearchInput(
                     event.target.value,
                   )
                   setPage(1)
@@ -1242,153 +1547,441 @@ function QueriesPage({
           </select>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1100px]">
+        <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/60 px-4 py-2 text-[8px] text-slate-500">
+          <span>
+            {
+              data.total === 0
+                ? '0 queries'
+                : `Showing ${firstVisible}-${lastVisible} of ${data.total} queries`
+            }
+          </span>
+
+          {loading && (
+            <span className="font-semibold text-blue-600">
+              Refreshing queries...
+            </span>
+          )}
+        </div>
+
+        <div className="w-full overflow-hidden">
+          <table className="w-full table-fixed">
+            <colgroup>
+              <col className="w-[20%]" />
+              <col className="w-[14%]" />
+              <col className="w-[12%]" />
+              <col className="w-[7%]" />
+              <col className="w-[8%]" />
+              <col className="w-[8%]" />
+              <col className="w-[11%]" />
+              <col className="w-[10%]" />
+              <col className="w-[10%]" />
+            </colgroup>
+
             <thead>
               <tr className="bg-slate-50 text-left text-[7px] font-bold uppercase tracking-wide text-slate-400">
-                <th className="px-4 py-3">
-                  Query
-                </th>
-                <th className="px-4 py-3">
-                  Student
-                </th>
-                <th className="px-4 py-3">
-                  Department
-                </th>
-                <th className="px-4 py-3">
-                  Source
-                </th>
-                <th className="px-4 py-3">
-                  Priority
-                </th>
-                <th className="px-4 py-3">
-                  Status
-                </th>
-                <th className="px-4 py-3">
-                  SLA
-                </th>
-                <th className="px-4 py-3">
-                  Submitted
-                </th>
+                <th className="px-3 py-3">Query</th>
+                <th className="px-3 py-3">Student</th>
+                <th className="px-3 py-3">Department</th>
+                <th className="px-2 py-3">Source</th>
+                <th className="px-2 py-3">Priority</th>
+                <th className="px-2 py-3">Status</th>
+                <th className="px-3 py-3">SLA</th>
+                <th className="px-3 py-3">Submitted</th>
+                <th className="px-3 py-3">Action</th>
               </tr>
             </thead>
 
             <tbody>
               {data.items.map(
                 (ticket) => (
-                  <tr
+                  <Fragment
                     key={
                       ticket.ticket_id
                     }
-                    className="border-b border-slate-100 text-[9px]"
                   >
-                    <td className="px-4 py-4">
-                      <p className="font-mono font-bold text-blue-700">
+                    <tr className="border-b border-slate-100 align-top text-[8px]">
+                      <td className="px-3 py-4">
+                        <p className="font-mono text-[8px] font-bold text-blue-700">
+                          {ticket.ticket_number}
+                        </p>
+                        <p className="mt-1 break-words font-semibold leading-4 text-slate-700">
+                          {ticket.subject}
+                        </p>
+                        <p className="mt-1 break-words text-[7px] leading-3 text-slate-400">
+                          {ticket.category || 'Unclassified'}
+                        </p>
+                      </td>
+
+                      <td className="px-3 py-4">
+                        <p className="break-words font-semibold leading-4">
+                          {ticket.student_name}
+                        </p>
+                        <p className="mt-1 break-all text-[7px] leading-3 text-slate-400">
+                          {ticket.student_email}
+                        </p>
+                      </td>
+
+                      <td className="px-3 py-4">
+                        <p className="break-words leading-4">
+                          {ticket.department_name || '—'}
+                        </p>
+                        <p className="mt-1 break-words text-[7px] leading-3 text-slate-400">
+                          {ticket.desk_name || ''}
+                        </p>
+                      </td>
+
+                      <td className="px-2 py-4">
+                        <ValueBadge value={ticket.source} />
+                      </td>
+
+                      <td className="px-2 py-4">
+                        <ValueBadge value={ticket.priority || '—'} />
+                      </td>
+
+                      <td className="px-2 py-4">
+                        <ValueBadge value={ticket.status} />
+                      </td>
+
+                      <td className="px-3 py-4 leading-4 text-slate-600">
                         {
-                          ticket.ticket_number
+                          ticket.status === 'RESOLVED'
+                          || ticket.status === 'CLOSED'
+                            ? 'Completed'
+                            : formatDate(ticket.sla_due_at)
                         }
-                      </p>
+                      </td>
 
-                      <p className="mt-1 max-w-[230px] truncate font-semibold text-slate-700">
-                        {ticket.subject}
-                      </p>
-
-                      <p className="mt-1 text-[7px] text-slate-400">
+                      <td className="px-3 py-4 leading-4 text-slate-500">
                         {
-                          ticket.category
-                          || 'Unclassified'
-                        }
-                      </p>
-                    </td>
-
-                    <td className="px-4 py-4">
-                      <p className="font-semibold">
-                        {
-                          ticket.student_name
-                        }
-                      </p>
-
-                      <p className="mt-1 text-[7px] text-slate-400">
-                        {
-                          ticket.student_email
-                        }
-                      </p>
-                    </td>
-
-                    <td className="px-4 py-4">
-                      <p>
-                        {
-                          ticket.department_name
-                          || '—'
-                        }
-                      </p>
-
-                      <p className="mt-1 text-[7px] text-slate-400">
-                        {
-                          ticket.desk_name
-                          || ''
-                        }
-                      </p>
-                    </td>
-
-                    <td className="px-4 py-4">
-                      <ValueBadge
-                        value={
-                          ticket.source
-                        }
-                      />
-                    </td>
-
-                    <td className="px-4 py-4">
-                      <ValueBadge
-                        value={
-                          ticket.priority
-                          || '—'
-                        }
-                      />
-                    </td>
-
-                    <td className="px-4 py-4">
-                      <ValueBadge
-                        value={
-                          ticket.status
-                        }
-                      />
-                    </td>
-
-                    <td className="px-4 py-4 text-slate-600">
-                      {
-                        ticket.status
-                          === 'RESOLVED'
-                          || ticket.status
-                          === 'CLOSED'
-                          ? 'Completed'
-                          : formatDate(
-                            ticket.sla_due_at,
+                          formatDate(
+                            ticket.submitted_at
+                            || ticket.created_at,
                           )
-                      }
-                    </td>
+                        }
+                      </td>
 
-                    <td className="px-4 py-4 text-slate-500">
-                      {
-                        formatDate(
-                          ticket.submitted_at
-                          || ticket.created_at,
-                        )
-                      }
-                    </td>
-                  </tr>
+                      <td className="px-3 py-4">
+                        {
+                          ticket.has_active_admin_escalation
+                            ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  toggleAdminReview(ticket)
+                                }
+                                disabled={
+                                  reviewLoading
+                                  && reviewTicketNumber
+                                  === ticket.ticket_number
+                                }
+                                className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[8px] font-semibold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                              >
+                                {
+                                  reviewTicketNumber
+                                  === ticket.ticket_number
+                                    ? 'Close Review'
+                                    : 'Admin Review'
+                                }
+                              </button>
+                            )
+                            : (
+                              <span className="text-slate-300">—</span>
+                            )
+                        }
+                      </td>
+                    </tr>
+
+                    {
+                      reviewTicketNumber
+                      === ticket.ticket_number
+                      && (
+                        <tr className="border-b border-slate-100 bg-slate-50/40">
+                          <td
+                            colSpan="9"
+                            className="px-4 py-4"
+                          >
+                            <div className="rounded-2xl border border-blue-200 bg-white p-4">
+
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                  <p className="text-[7px] font-bold uppercase tracking-[0.18em] text-blue-600">
+                                    Admin escalation review
+                                  </p>
+                                  <h3 className="mt-1 text-[13px] font-bold text-slate-900">
+                                    {ticket.ticket_number} · {ticket.subject}
+                                  </h3>
+                                  <p className="mt-1 text-[8px] text-slate-500">
+                                    Highest-level escalation review. Reassign the query or override the escalation decision.
+                                  </p>
+                                </div>
+
+                                <ValueBadge value={ticket.status} />
+                              </div>
+
+                              {
+                                reviewLoading
+                                  ? (
+                                    <div className="mt-4 rounded-xl bg-slate-50 p-4 text-[9px] text-slate-500">
+                                      Loading Admin escalation review...
+                                    </div>
+                                  )
+                                  : reviewData
+                                    ? (
+                                      <>
+                                        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                                          <div className="rounded-xl bg-slate-50 p-3">
+                                            <p className="text-[7px] font-bold uppercase text-slate-400">
+                                              Current owner
+                                            </p>
+                                            <p className="mt-1 text-[9px] font-semibold text-slate-700">
+                                              {reviewData.assigned_officer_name || 'Unassigned'}
+                                            </p>
+                                          </div>
+
+                                          <div className="rounded-xl bg-slate-50 p-3">
+                                            <p className="text-[7px] font-bold uppercase text-slate-400">
+                                              Department
+                                            </p>
+                                            <p className="mt-1 text-[9px] font-semibold text-slate-700">
+                                              {reviewData.department_name || '—'}
+                                            </p>
+                                          </div>
+
+                                          <div className="rounded-xl bg-slate-50 p-3">
+                                            <p className="text-[7px] font-bold uppercase text-slate-400">
+                                              Escalated from
+                                            </p>
+                                            <p className="mt-1 text-[9px] font-semibold text-slate-700">
+                                              {reviewData.escalated_from_name || 'Department authority'}
+                                            </p>
+                                          </div>
+
+                                          <div className="rounded-xl bg-slate-50 p-3">
+                                            <p className="text-[7px] font-bold uppercase text-slate-400">
+                                              Escalated at
+                                            </p>
+                                            <p className="mt-1 text-[9px] font-semibold text-slate-700">
+                                              {formatDate(reviewData.escalated_at)}
+                                            </p>
+                                          </div>
+                                        </div>
+
+                                        <div className="mt-3 rounded-xl border border-rose-100 bg-rose-50/60 p-3">
+                                          <p className="text-[7px] font-bold uppercase text-rose-500">
+                                            Escalation reason
+                                          </p>
+                                          <p className="mt-1 text-[9px] leading-5 text-slate-700">
+                                            {reviewData.escalation_reason}
+                                          </p>
+                                        </div>
+
+                                        <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                                          <section className="rounded-2xl border border-blue-200 bg-white p-4">
+                                            <h4 className="text-[11px] font-bold text-slate-900">
+                                              Reassign query
+                                            </h4>
+                                            <p className="mt-1 text-[8px] leading-4 text-slate-500">
+                                              Move the query to an available staff member or instructor across the university. The Admin escalation will be closed and the query returns to ROUTED.
+                                            </p>
+
+                                            <select
+                                              value={selectedOfficerId}
+                                              onChange={(event) =>
+                                                setSelectedOfficerId(
+                                                  event.target.value,
+                                                )
+                                              }
+                                              disabled={Boolean(actionLoading)}
+                                              className="mt-3 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-[9px]"
+                                            >
+                                              <option value="">
+                                                Select staff member
+                                              </option>
+
+                                              {
+                                                escalationOptions
+                                                  .filter(
+                                                    (officer) =>
+                                                      officer.user_id
+                                                      !== reviewData.assigned_officer_id,
+                                                  )
+                                                  .map(
+                                                    (officer) => (
+                                                      <option
+                                                        key={officer.user_id}
+                                                        value={officer.user_id}
+                                                      >
+                                                        {officer.department_name} — {officer.full_name} ({prettyText(officer.role)})
+                                                      </option>
+                                                    ),
+                                                  )
+                                              }
+                                            </select>
+
+                                            <textarea
+                                              rows={4}
+                                              maxLength={500}
+                                              value={reassignReason}
+                                              onChange={(event) =>
+                                                setReassignReason(
+                                                  event.target.value,
+                                                )
+                                              }
+                                              placeholder="Reason for Admin reassignment..."
+                                              disabled={Boolean(actionLoading)}
+                                              className="mt-3 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[9px] leading-5 outline-none focus:border-blue-300 focus:bg-white"
+                                            />
+
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                runAdminAction(
+                                                  ticket,
+                                                  'REASSIGN',
+                                                )
+                                              }
+                                              disabled={
+                                                !selectedOfficerId
+                                                || reassignReason.trim().length < 5
+                                                || Boolean(actionLoading)
+                                              }
+                                              className="mt-3 w-full rounded-xl bg-blue-600 px-4 py-3 text-[9px] font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+                                            >
+                                              {
+                                                actionLoading
+                                                === `${ticket.ticket_number}-REASSIGN`
+                                                  ? 'Reassigning...'
+                                                  : 'Reassign Query'
+                                              }
+                                            </button>
+
+                                            {
+                                              actionFeedback.action === 'REASSIGN'
+                                              && actionFeedback.message
+                                              && (
+                                                <div
+                                                  className={
+                                                    'mt-3 rounded-xl border p-3 text-[8px] leading-4 '
+                                                    + (
+                                                      actionFeedback.type === 'success'
+                                                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                                        : 'border-rose-200 bg-rose-50 text-rose-700'
+                                                    )
+                                                  }
+                                                >
+                                                  {actionFeedback.message}
+                                                </div>
+                                              )
+                                            }
+                                          </section>
+
+                                          <section className="rounded-2xl border border-amber-200 bg-white p-4">
+                                            <h4 className="text-[11px] font-bold text-slate-900">
+                                              Override decision
+                                            </h4>
+                                            <p className="mt-1 text-[8px] leading-4 text-slate-500">
+                                              Keep the current officer assigned, close the Admin escalation and return the query to IN PROGRESS. A reason is required and audited.
+                                            </p>
+
+                                            <textarea
+                                              rows={4}
+                                              maxLength={500}
+                                              value={overrideReason}
+                                              onChange={(event) =>
+                                                setOverrideReason(
+                                                  event.target.value,
+                                                )
+                                              }
+                                              placeholder="Reason for Admin override..."
+                                              disabled={Boolean(actionLoading)}
+                                              className="mt-3 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[9px] leading-5 outline-none focus:border-amber-300 focus:bg-white"
+                                            />
+
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                runAdminAction(
+                                                  ticket,
+                                                  'OVERRIDE',
+                                                )
+                                              }
+                                              disabled={
+                                                overrideReason.trim().length < 5
+                                                || Boolean(actionLoading)
+                                              }
+                                              className="mt-3 w-full rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[9px] font-semibold text-amber-700 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-40"
+                                            >
+                                              {
+                                                actionLoading
+                                                === `${ticket.ticket_number}-OVERRIDE`
+                                                  ? 'Overriding...'
+                                                  : 'Override Decision'
+                                              }
+                                            </button>
+
+                                            {
+                                              actionFeedback.action === 'OVERRIDE'
+                                              && actionFeedback.message
+                                              && (
+                                                <div
+                                                  className={
+                                                    'mt-3 rounded-xl border p-3 text-[8px] leading-4 '
+                                                    + (
+                                                      actionFeedback.type === 'success'
+                                                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                                        : 'border-rose-200 bg-rose-50 text-rose-700'
+                                                    )
+                                                  }
+                                                >
+                                                  {actionFeedback.message}
+                                                </div>
+                                              )
+                                            }
+                                          </section>
+                                        </div>
+                                      </>
+                                    )
+                                    : (
+                                      <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-[8px] text-rose-700">
+                                        {
+                                          actionFeedback.message
+                                          || 'Admin escalation information is unavailable.'
+                                        }
+                                      </div>
+                                    )
+                              }
+
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    }
+                  </Fragment>
                 ),
               )}
 
               {
-                !loading
-                && data.items.length
-                === 0
+                loading
+                && data.items.length === 0
                 && (
                   <tr>
                     <td
-                      colSpan="8"
+                      colSpan="9"
+                      className="px-5 py-14 text-center text-[9px] text-slate-500"
+                    >
+                      Loading queries...
+                    </td>
+                  </tr>
+                )
+              }
+
+              {
+                !loading
+                && data.items.length === 0
+                && (
+                  <tr>
+                    <td
+                      colSpan="9"
                       className="px-5 py-14 text-center text-[9px] text-slate-400"
                     >
                       No queries match the selected filters.
@@ -1400,19 +1993,9 @@ function QueriesPage({
           </table>
         </div>
 
-        {loading && (
-          <div className="border-t border-slate-100 py-5 text-center text-[9px] text-slate-500">
-            Loading queries...
-          </div>
-        )}
-
         <Pagination
-          page={
-            data.page
-          }
-          totalPages={
-            data.total_pages
-          }
+          page={data.page}
+          totalPages={data.total_pages}
           onPrevious={() =>
             setPage(
               (current) =>
@@ -1536,28 +2119,18 @@ function UserManagementPage({
         setErrorMessage('')
 
         try {
-          const [
-            userData,
-            optionData,
-          ] =
-            await Promise.all([
-              getAdminUsers(
-                accessToken,
-                {
-                  search,
-                  role:
-                    roleFilter,
-                  status:
-                    statusFilter,
-                },
-                signal,
-              ),
-
-              getAdminUserOptions(
-                accessToken,
-                signal,
-              ),
-            ])
+          const userData =
+            await getAdminUsers(
+              accessToken,
+              {
+                search,
+                role:
+                  roleFilter,
+                status:
+                  statusFilter,
+              },
+              signal,
+            )
 
           if (
             signal?.aborted
@@ -1572,6 +2145,50 @@ function UserManagementPage({
               ? userData.items
               : [],
           )
+        } catch (error) {
+          if (
+            error?.name
+            !== 'AbortError'
+          ) {
+            setErrorMessage(
+              error.message
+              || 'Users could not be loaded.',
+            )
+          }
+        } finally {
+          if (
+            !signal?.aborted
+          ) {
+            setLoading(false)
+          }
+        }
+      },
+      [
+        accessToken,
+        roleFilter,
+        search,
+        statusFilter,
+      ],
+    )
+
+
+  const loadUserOptions =
+    useCallback(
+      async (
+        signal,
+      ) => {
+        try {
+          const optionData =
+            await getAdminUserOptions(
+              accessToken,
+              signal,
+            )
+
+          if (
+            signal?.aborted
+          ) {
+            return
+          }
 
           setOptions({
             roles:
@@ -1602,22 +2219,13 @@ function UserManagementPage({
           ) {
             setErrorMessage(
               error.message
-              || 'Users could not be loaded.',
+              || 'User options could not be loaded.',
             )
-          }
-        } finally {
-          if (
-            !signal?.aborted
-          ) {
-            setLoading(false)
           }
         }
       },
       [
         accessToken,
-        roleFilter,
-        search,
-        statusFilter,
       ],
     )
 
@@ -1647,6 +2255,31 @@ function UserManagementPage({
   ])
 
 
+  useEffect(() => {
+    const controller =
+      new AbortController()
+
+    const timer =
+      window.setTimeout(
+        () => {
+          void loadUserOptions(
+            controller.signal,
+          )
+        },
+        0,
+      )
+
+    return () => {
+      window.clearTimeout(
+        timer,
+      )
+      controller.abort()
+    }
+  }, [
+    loadUserOptions,
+  ])
+
+
   const roleNeedsDepartment =
     (role) =>
       [
@@ -1672,6 +2305,123 @@ function UserManagementPage({
           || desk.department_id
           === departmentId,
       )
+
+
+  const userMatchesCurrentFilters =
+    (user) => {
+      const normalizedSearch =
+        search.trim().toLowerCase()
+
+      const displayName =
+        String(
+          user?.full_name
+          || '',
+        ).toLowerCase()
+
+      const email =
+        String(
+          user?.email
+          || '',
+        ).toLowerCase()
+
+      const matchesSearch =
+        !normalizedSearch
+        || displayName.includes(
+          normalizedSearch,
+        )
+        || email.includes(
+          normalizedSearch,
+        )
+
+      const matchesRole =
+        roleFilter === 'ALL'
+        || user?.role
+        === roleFilter
+
+      const matchesStatus =
+        statusFilter === 'ALL'
+        || (
+          statusFilter === 'ACTIVE'
+          && user?.is_active
+        )
+        || (
+          statusFilter === 'INACTIVE'
+          && !user?.is_active
+        )
+
+      return (
+        matchesSearch
+        && matchesRole
+        && matchesStatus
+      )
+    }
+
+
+  const sortUserRows =
+    (rows) =>
+      [...rows].sort(
+        (
+          left,
+          right,
+        ) => {
+          const activeDifference =
+            Number(
+              Boolean(
+                right?.is_active,
+              ),
+            )
+            - Number(
+              Boolean(
+                left?.is_active,
+              ),
+            )
+
+          if (activeDifference) {
+            return activeDifference
+          }
+
+          return String(
+            left?.full_name
+            || left?.email
+            || '',
+          ).localeCompare(
+            String(
+              right?.full_name
+              || right?.email
+              || '',
+            ),
+          )
+        },
+      )
+
+
+  const mergeUserIntoList =
+    (nextUser) => {
+      setUsers(
+        (current) => {
+          const withoutCurrent =
+            current.filter(
+              (item) =>
+                item.approved_user_id
+                !== nextUser.approved_user_id,
+            )
+
+          if (
+            userMatchesCurrentFilters(
+              nextUser,
+            )
+          ) {
+            withoutCurrent.push(
+              nextUser,
+            )
+          }
+
+          return sortUserRows(
+            withoutCurrent,
+          )
+        },
+      )
+    }
 
 
   const submitCreate =
@@ -1718,9 +2468,14 @@ function UserManagementPage({
       )
 
       try {
-        await createAdminUser(
-          accessToken,
-          payload,
+        const createdUser =
+          await createAdminUser(
+            accessToken,
+            payload,
+          )
+
+        mergeUserIntoList(
+          createdUser,
         )
 
         setSuccessMessage(
@@ -1736,8 +2491,6 @@ function UserManagementPage({
         })
 
         setShowCreate(false)
-
-        await loadUsers()
       } catch (error) {
         setErrorMessage(
           error.message
@@ -1816,10 +2569,15 @@ function UserManagementPage({
       setSuccessMessage('')
 
       try {
-        await updateAdminUser(
-          accessToken,
-          editingUser.approved_user_id,
-          payload,
+        const updatedUser =
+          await updateAdminUser(
+            accessToken,
+            editingUser.approved_user_id,
+            payload,
+          )
+
+        mergeUserIntoList(
+          updatedUser,
         )
 
         setEditingUser(null)
@@ -1827,8 +2585,6 @@ function UserManagementPage({
         setSuccessMessage(
           'User updated successfully.',
         )
-
-        await loadUsers()
       } catch (error) {
         setErrorMessage(
           error.message
@@ -1867,13 +2623,18 @@ function UserManagementPage({
       setSuccessMessage('')
 
       try {
-        await updateAdminUser(
-          accessToken,
-          user.approved_user_id,
-          {
-            is_active:
-              nextActive,
-          },
+        const updatedUser =
+          await updateAdminUser(
+            accessToken,
+            user.approved_user_id,
+            {
+              is_active:
+                nextActive,
+            },
+          )
+
+        mergeUserIntoList(
+          updatedUser,
         )
 
         setSuccessMessage(
@@ -1881,8 +2642,6 @@ function UserManagementPage({
             ? 'User reactivated successfully.'
             : 'User deactivated successfully.',
         )
-
-        await loadUsers()
       } catch (error) {
         setErrorMessage(
           error.message
@@ -1892,6 +2651,227 @@ function UserManagementPage({
         setActionLoading('')
       }
     }
+
+
+  const closeCreateForm =
+    () => {
+      setShowCreate(false)
+
+      setCreateForm({
+        email: '',
+        full_name: '',
+        role: 'STUDENT',
+        department_id: '',
+        desk_id: '',
+      })
+
+      setErrorMessage('')
+    }
+
+
+  const renderUserEditForm =
+    () => (
+      <form
+        onSubmit={
+          submitEdit
+        }
+        className="mt-4 rounded-2xl border border-violet-100 bg-white p-5"
+      >
+        <div className="flex justify-between gap-4">
+          <div>
+            <h2 className="text-[14px] font-bold">
+              Edit user
+            </h2>
+
+            <p className="mt-1 text-[8px] text-slate-500">
+              {editingUser.email}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() =>
+              setEditingUser(null)
+            }
+            className="text-[9px] font-semibold text-slate-500"
+          >
+            Cancel
+          </button>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <input
+            required
+            value={
+              editForm.full_name
+            }
+            onChange={
+              (event) =>
+                setEditForm(
+                  (current) => ({
+                    ...current,
+                    full_name:
+                      event.target.value,
+                  }),
+                )
+            }
+            className="h-10 rounded-xl border border-slate-200 px-3 text-[9px]"
+          />
+
+          <select
+            value={
+              editForm.role
+            }
+            onChange={
+              (event) => {
+                const role =
+                  event.target.value
+
+                setEditForm(
+                  (current) => ({
+                    ...current,
+                    role,
+                    department_id:
+                      roleNeedsDepartment(
+                        role,
+                      )
+                        ? current.department_id
+                        : '',
+                    desk_id:
+                      roleAllowsDesk(
+                        role,
+                      )
+                        ? current.desk_id
+                        : '',
+                  }),
+                )
+              }
+            }
+            className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-[9px]"
+          >
+            {options.roles.map(
+              (role) => (
+                <option
+                  key={role}
+                  value={role}
+                >
+                  {roleLabel(role)}
+                </option>
+              ),
+            )}
+          </select>
+
+          <select
+            value={
+              editForm.department_id
+            }
+            disabled={
+              !roleNeedsDepartment(
+                editForm.role,
+              )
+            }
+            onChange={
+              (event) =>
+                setEditForm(
+                  (current) => ({
+                    ...current,
+                    department_id:
+                      event.target.value,
+                    desk_id: '',
+                  }),
+                )
+            }
+            className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-[9px] disabled:bg-slate-100"
+          >
+            <option value="">
+              Select department
+            </option>
+
+            {options.departments.map(
+              (department) => (
+                <option
+                  key={
+                    department.department_id
+                  }
+                  value={
+                    department.department_id
+                  }
+                >
+                  {
+                    department.department_name
+                  }
+                </option>
+              ),
+            )}
+          </select>
+
+          <select
+            value={
+              editForm.desk_id
+            }
+            disabled={
+              !roleAllowsDesk(
+                editForm.role,
+              )
+            }
+            onChange={
+              (event) =>
+                setEditForm(
+                  (current) => ({
+                    ...current,
+                    desk_id:
+                      event.target.value,
+                  }),
+                )
+            }
+            className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-[9px] disabled:bg-slate-100"
+          >
+            <option value="">
+              No specific desk
+            </option>
+
+            {desksForDepartment(
+              editForm.department_id,
+            ).map(
+              (desk) => (
+                <option
+                  key={
+                    desk.desk_id
+                  }
+                  value={
+                    desk.desk_id
+                  }
+                >
+                  {desk.desk_name}
+                </option>
+              ),
+            )}
+          </select>
+        </div>
+
+        <button
+          type="submit"
+          disabled={
+            Boolean(
+              actionLoading,
+            )
+          }
+          className="mt-4 inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-5 py-2.5 text-[9px] font-semibold text-white disabled:cursor-wait disabled:opacity-70"
+        >
+          {
+            actionLoading
+              === `EDIT-${editingUser.approved_user_id}`
+              ? (
+                <>
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                  Saving...
+                </>
+              )
+              : 'Save Changes'
+          }
+        </button>
+      </form>
+    )
 
 
   return (
@@ -1904,19 +2884,31 @@ function UserManagementPage({
           <button
             type="button"
             onClick={() => {
-              setShowCreate(
-                (current) =>
-                  !current,
-              )
-              setEditingUser(null)
+              if (showCreate) {
+                closeCreateForm()
+              } else {
+                setShowCreate(true)
+                setEditingUser(null)
+              }
             }}
-            className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-[9px] font-semibold text-white"
+            className={
+              showCreate
+                ? 'rounded-xl border border-slate-200 bg-white px-5 py-3 text-[9px] font-semibold text-slate-600 hover:bg-slate-50'
+                : 'flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-[9px] font-semibold text-white'
+            }
           >
-            <Icon
-              name="plus"
-              className="h-4 w-4"
-            />
-            Add User
+            {!showCreate && (
+              <Icon
+                name="plus"
+                className="h-4 w-4"
+              />
+            )}
+
+            {
+              showCreate
+                ? 'Close'
+                : 'Add User'
+            }
           </button>
         }
       />
@@ -1940,13 +2932,31 @@ function UserManagementPage({
           }
           className="mt-4 rounded-2xl border border-blue-100 bg-white p-5"
         >
-          <h2 className="text-[14px] font-bold">
-            Authorize new user
-          </h2>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-[14px] font-bold">
+                Authorize new user
+              </h2>
 
-          <p className="mt-1 text-[8px] text-slate-500">
-            Access will use the existing Google/Supabase authentication flow.
-          </p>
+              <p className="mt-1 text-[8px] text-slate-500">
+                Access will use the existing Google/Supabase authentication flow.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={
+                closeCreateForm
+              }
+              disabled={
+                actionLoading
+                === 'CREATE'
+              }
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[9px] font-semibold text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
 
           <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
             <input
@@ -2119,218 +3129,61 @@ function UserManagementPage({
             </select>
           </div>
 
-          <button
-            type="submit"
-            disabled={
-              actionLoading
-              === 'CREATE'
-            }
-            className="mt-4 rounded-xl bg-blue-600 px-5 py-2.5 text-[9px] font-semibold text-white disabled:opacity-50"
-          >
-            {
-              actionLoading
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <button
+              type="submit"
+              disabled={
+                actionLoading
                 === 'CREATE'
-                ? 'Adding...'
-                : 'Add User'
-            }
-          </button>
-        </form>
-      )}
-
-      {editingUser && (
-        <form
-          onSubmit={
-            submitEdit
-          }
-          className="mt-4 rounded-2xl border border-violet-100 bg-white p-5"
-        >
-          <div className="flex justify-between gap-4">
-            <div>
-              <h2 className="text-[14px] font-bold">
-                Edit user
-              </h2>
-
-              <p className="mt-1 text-[8px] text-slate-500">
-                {editingUser.email}
-              </p>
-            </div>
+              }
+              className="rounded-xl bg-blue-600 px-5 py-2.5 text-[9px] font-semibold text-white disabled:opacity-50"
+            >
+              {
+                actionLoading
+                  === 'CREATE'
+                  ? (
+                    <>
+                      <span className="mr-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-white/40 border-t-white align-middle" />
+                      Adding...
+                    </>
+                  )
+                  : 'Add User'
+              }
+            </button>
 
             <button
               type="button"
-              onClick={() =>
-                setEditingUser(null)
+              onClick={
+                closeCreateForm
               }
-              className="text-[9px] font-semibold text-slate-500"
+              disabled={
+                actionLoading
+                === 'CREATE'
+              }
+              className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-[9px] font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Cancel
             </button>
           </div>
-
-          <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <input
-              required
-              value={
-                editForm.full_name
-              }
-              onChange={
-                (event) =>
-                  setEditForm(
-                    (current) => ({
-                      ...current,
-                      full_name:
-                        event.target.value,
-                    }),
-                  )
-              }
-              className="h-10 rounded-xl border border-slate-200 px-3 text-[9px]"
-            />
-
-            <select
-              value={
-                editForm.role
-              }
-              onChange={
-                (event) => {
-                  const role =
-                    event.target.value
-
-                  setEditForm(
-                    (current) => ({
-                      ...current,
-                      role,
-                      department_id:
-                        roleNeedsDepartment(
-                          role,
-                        )
-                          ? current.department_id
-                          : '',
-                      desk_id:
-                        roleAllowsDesk(
-                          role,
-                        )
-                          ? current.desk_id
-                          : '',
-                    }),
-                  )
-                }
-              }
-              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-[9px]"
-            >
-              {options.roles.map(
-                (role) => (
-                  <option
-                    key={role}
-                    value={role}
-                  >
-                    {roleLabel(role)}
-                  </option>
-                ),
-              )}
-            </select>
-
-            <select
-              value={
-                editForm.department_id
-              }
-              disabled={
-                !roleNeedsDepartment(
-                  editForm.role,
-                )
-              }
-              onChange={
-                (event) =>
-                  setEditForm(
-                    (current) => ({
-                      ...current,
-                      department_id:
-                        event.target.value,
-                      desk_id: '',
-                    }),
-                  )
-              }
-              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-[9px] disabled:bg-slate-100"
-            >
-              <option value="">
-                Select department
-              </option>
-
-              {options.departments.map(
-                (department) => (
-                  <option
-                    key={
-                      department.department_id
-                    }
-                    value={
-                      department.department_id
-                    }
-                  >
-                    {
-                      department.department_name
-                    }
-                  </option>
-                ),
-              )}
-            </select>
-
-            <select
-              value={
-                editForm.desk_id
-              }
-              disabled={
-                !roleAllowsDesk(
-                  editForm.role,
-                )
-              }
-              onChange={
-                (event) =>
-                  setEditForm(
-                    (current) => ({
-                      ...current,
-                      desk_id:
-                        event.target.value,
-                    }),
-                  )
-              }
-              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-[9px] disabled:bg-slate-100"
-            >
-              <option value="">
-                No specific desk
-              </option>
-
-              {desksForDepartment(
-                editForm.department_id,
-              ).map(
-                (desk) => (
-                  <option
-                    key={
-                      desk.desk_id
-                    }
-                    value={
-                      desk.desk_id
-                    }
-                  >
-                    {desk.desk_name}
-                  </option>
-                ),
-              )}
-            </select>
-          </div>
-
-          <button
-            type="submit"
-            disabled={
-              Boolean(
-                actionLoading,
-              )
-            }
-            className="mt-4 rounded-xl bg-violet-600 px-5 py-2.5 text-[9px] font-semibold text-white disabled:opacity-50"
-          >
-            Save Changes
-          </button>
         </form>
       )}
 
-      <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+
+      <div
+        className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white"
+        aria-busy={loading}
+      >
+        {loading && (
+          <div
+            role="status"
+            aria-live="polite"
+            className="flex items-center gap-2 border-b border-blue-100 bg-blue-50 px-4 py-2 text-[8px] font-semibold text-blue-700"
+          >
+            <span className="h-3 w-3 animate-spin rounded-full border-2 border-blue-200 border-t-blue-600" />
+            Updating user results...
+          </div>
+        )}
+
         <div className="flex flex-wrap gap-3 border-b border-slate-100 p-4">
           <div className="relative min-w-[230px] flex-1">
             <Icon
@@ -2431,104 +3284,139 @@ function UserManagementPage({
             <tbody>
               {users.map(
                 (user) => (
-                  <tr
+                  <Fragment
                     key={
                       user.approved_user_id
                     }
-                    className="border-b border-slate-100 text-[9px]"
                   >
-                    <td className="px-4 py-4">
-                      <p className="font-bold">
-                        {
-                          user.full_name
-                        }
-                      </p>
-
-                      <p className="mt-1 text-[7px] text-slate-400">
-                        {user.email}
-                      </p>
-                    </td>
-
-                    <td className="px-4 py-4">
-                      <ValueBadge
-                        value={
-                          user.role
-                        }
-                      />
-                    </td>
-
-                    <td className="px-4 py-4">
-                      {
-                        user.department_name
-                        || '—'
+                    <tr
+                      key={
+                        user.approved_user_id
                       }
-                    </td>
-
-                    <td className="px-4 py-4">
-                      {
-                        user.desk_name
-                        || '—'
-                      }
-                    </td>
-
-                    <td className="px-4 py-4">
-                      {
-                        user.is_provisioned
-                          ? 'Provisioned'
-                          : 'Awaiting login'
-                      }
-                    </td>
-
-                    <td className="px-4 py-4">
-                      <ActiveBadge
-                        active={
-                          user.is_active
-                        }
-                      />
-                    </td>
-
-                    <td className="px-4 py-4">
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            beginEdit(user)
-                          }
-                          className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[8px] font-semibold text-blue-700"
-                        >
-                          Edit
-                        </button>
-
-                        <button
-                          type="button"
-                          disabled={
-                            Boolean(
-                              actionLoading,
-                            )
-                          }
-                          onClick={() =>
-                            toggleStatus(
-                              user,
-                            )
-                          }
-                          className={
-                            'rounded-lg border px-3 py-2 text-[8px] font-semibold disabled:opacity-50 '
-                            + (
-                              user.is_active
-                                ? 'border-rose-200 bg-rose-50 text-rose-700'
-                                : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                            )
-                          }
-                        >
+                      className="border-b border-slate-100 text-[9px]"
+                    >
+                      <td className="px-4 py-4">
+                        <p className="font-bold">
                           {
-                            user.is_active
-                              ? 'Deactivate'
-                              : 'Reactivate'
+                            user.full_name
                           }
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                        </p>
+
+                        <p className="mt-1 text-[7px] text-slate-400">
+                          {user.email}
+                        </p>
+                      </td>
+
+                      <td className="px-4 py-4">
+                        <ValueBadge
+                          value={
+                            user.role
+                          }
+                        />
+                      </td>
+
+                      <td className="px-4 py-4">
+                        {
+                          user.department_name
+                          || '—'
+                        }
+                      </td>
+
+                      <td className="px-4 py-4">
+                        {
+                          user.desk_name
+                          || '—'
+                        }
+                      </td>
+
+                      <td className="px-4 py-4">
+                        {
+                          user.is_provisioned
+                            ? 'Provisioned'
+                            : 'Awaiting login'
+                        }
+                      </td>
+
+                      <td className="px-4 py-4">
+                        <ActiveBadge
+                          active={
+                            user.is_active
+                          }
+                        />
+                      </td>
+
+                      <td className="px-4 py-4">
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            disabled={
+                              Boolean(
+                                actionLoading,
+                              )
+                            }
+                            onClick={() =>
+                              beginEdit(user)
+                            }
+                            className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[8px] font-semibold text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Edit
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={
+                              Boolean(
+                                actionLoading,
+                              )
+                            }
+                            onClick={() =>
+                              toggleStatus(
+                                user,
+                              )
+                            }
+                            className={
+                              'rounded-lg border px-3 py-2 text-[8px] font-semibold disabled:opacity-50 '
+                              + (
+                                user.is_active
+                                  ? 'border-rose-200 bg-rose-50 text-rose-700'
+                                  : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                              )
+                            }
+                          >
+                            {
+                              actionLoading
+                                === user.approved_user_id
+                                ? (
+                                  user.is_active
+                                    ? 'Deactivating...'
+                                    : 'Reactivating...'
+                                )
+                                : (
+                                  user.is_active
+                                    ? 'Deactivate'
+                                    : 'Reactivate'
+                                )
+                            }
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+
+                    {
+                      editingUser?.approved_user_id
+                      === user.approved_user_id
+                      && (
+                        <tr className="border-b border-violet-100 bg-violet-50/30">
+                          <td
+                            colSpan="7"
+                            className="px-4 pb-4"
+                          >
+                            {renderUserEditForm()}
+                          </td>
+                        </tr>
+                      )
+                    }
+                  </Fragment>
                 ),
               )}
 
@@ -2550,8 +3438,12 @@ function UserManagementPage({
           </table>
         </div>
 
-        {loading && (
-          <div className="py-5 text-center text-[9px] text-slate-500">
+        {loading && users.length === 0 && (
+          <div
+            role="status"
+            className="flex items-center justify-center gap-2 py-8 text-[9px] text-slate-500"
+          >
+            <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
             Loading users...
           </div>
         )}
@@ -2700,6 +3592,60 @@ function DepartmentsPage({
   ])
 
 
+  const sortDepartmentRows =
+    (rows) =>
+      [...rows].sort(
+        (
+          left,
+          right,
+        ) => {
+          const activeDifference =
+            Number(
+              Boolean(
+                right?.is_active,
+              ),
+            )
+            - Number(
+              Boolean(
+                left?.is_active,
+              ),
+            )
+
+          if (activeDifference) {
+            return activeDifference
+          }
+
+          return String(
+            left?.department_name
+            || '',
+          ).localeCompare(
+            String(
+              right?.department_name
+              || '',
+            ),
+          )
+        },
+      )
+
+
+  const mergeDepartmentIntoList =
+    (nextDepartment) => {
+      setDepartments(
+        (current) =>
+          sortDepartmentRows(
+            [
+              ...current.filter(
+                (item) =>
+                  item.department_id
+                  !== nextDepartment.department_id,
+              ),
+              nextDepartment,
+            ],
+          ),
+      )
+    }
+
+
   const submitCreate =
     async (
       event,
@@ -2713,19 +3659,24 @@ function DepartmentsPage({
       setSuccessMessage('')
 
       try {
-        await createAdminDepartment(
-          accessToken,
-          {
-            department_name:
-              createForm.department_name.trim(),
+        const createdDepartment =
+          await createAdminDepartment(
+            accessToken,
+            {
+              department_name:
+                createForm.department_name.trim(),
 
-            department_email:
-              createForm.department_email.trim(),
+              department_email:
+                createForm.department_email.trim(),
 
-            description:
-              createForm.description.trim()
-              || null,
-          },
+              description:
+                createForm.description.trim()
+                || null,
+            },
+          )
+
+        mergeDepartmentIntoList(
+          createdDepartment,
         )
 
         setCreateForm({
@@ -2739,8 +3690,6 @@ function DepartmentsPage({
         setSuccessMessage(
           'Department created successfully.',
         )
-
-        await loadDepartments()
       } catch (error) {
         setErrorMessage(
           error.message
@@ -2789,20 +3738,25 @@ function DepartmentsPage({
       setSuccessMessage('')
 
       try {
-        await updateAdminDepartment(
-          accessToken,
-          editing.department_id,
-          {
-            department_name:
-              editForm.department_name.trim(),
+        const updatedDepartment =
+          await updateAdminDepartment(
+            accessToken,
+            editing.department_id,
+            {
+              department_name:
+                editForm.department_name.trim(),
 
-            department_email:
-              editForm.department_email.trim(),
+              department_email:
+                editForm.department_email.trim(),
 
-            description:
-              editForm.description.trim()
-              || null,
-          },
+              description:
+                editForm.description.trim()
+                || null,
+            },
+          )
+
+        mergeDepartmentIntoList(
+          updatedDepartment,
         )
 
         setEditing(null)
@@ -2810,8 +3764,6 @@ function DepartmentsPage({
         setSuccessMessage(
           'Department updated successfully.',
         )
-
-        await loadDepartments()
       } catch (error) {
         setErrorMessage(
           error.message
@@ -2849,13 +3801,18 @@ function DepartmentsPage({
       setSuccessMessage('')
 
       try {
-        await updateAdminDepartment(
-          accessToken,
-          department.department_id,
-          {
-            is_active:
-              nextActive,
-          },
+        const updatedDepartment =
+          await updateAdminDepartment(
+            accessToken,
+            department.department_id,
+            {
+              is_active:
+                nextActive,
+            },
+          )
+
+        mergeDepartmentIntoList(
+          updatedDepartment,
         )
 
         setSuccessMessage(
@@ -2863,8 +3820,6 @@ function DepartmentsPage({
             ? 'Department reactivated.'
             : 'Department deactivated.',
         )
-
-        await loadDepartments()
       } catch (error) {
         setErrorMessage(
           error.message
@@ -2873,6 +3828,20 @@ function DepartmentsPage({
       } finally {
         setActionLoading('')
       }
+    }
+
+
+  const closeDepartmentCreateForm =
+    () => {
+      setShowCreate(false)
+
+      setCreateForm({
+        department_name: '',
+        department_email: '',
+        description: '',
+      })
+
+      setErrorMessage('')
     }
 
 
@@ -2896,6 +3865,123 @@ function DepartmentsPage({
     )
 
 
+  const renderDepartmentEditForm =
+    () => (
+      <form
+        onSubmit={
+          submitEdit
+        }
+        className="mt-4 rounded-2xl border border-violet-100 bg-white p-5"
+      >
+        <div className="flex justify-between">
+          <h2 className="text-[14px] font-bold">
+            Edit department
+          </h2>
+
+          <button
+            type="button"
+            disabled={
+              actionLoading
+              === editing.department_id
+            }
+            onClick={() =>
+              setEditing(null)
+            }
+            className="rounded-lg px-3 py-2 text-[9px] font-semibold text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Cancel
+          </button>
+        </div>
+
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <input
+            required
+            value={
+              editForm.department_name
+            }
+            onChange={
+              (event) =>
+                setEditForm(
+                  (current) => ({
+                    ...current,
+                    department_name:
+                      event.target.value,
+                  }),
+                )
+            }
+            className="h-10 rounded-xl border border-slate-200 px-3 text-[9px]"
+          />
+
+          <input
+            required
+            type="email"
+            value={
+              editForm.department_email
+            }
+            onChange={
+              (event) =>
+                setEditForm(
+                  (current) => ({
+                    ...current,
+                    department_email:
+                      event.target.value,
+                  }),
+                )
+            }
+            className="h-10 rounded-xl border border-slate-200 px-3 text-[9px]"
+          />
+        </div>
+
+        <textarea
+          value={
+            editForm.description
+          }
+          onChange={
+            (event) =>
+              setEditForm(
+                (current) => ({
+                  ...current,
+                  description:
+                    event.target.value,
+                }),
+              )
+          }
+          rows={3}
+          className="mt-3 w-full rounded-xl border border-slate-200 p-3 text-[9px]"
+        />
+
+        <button
+          type="submit"
+          disabled={
+            actionLoading
+            === editing.department_id
+          }
+          className={
+            'mt-3 inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-[9px] font-semibold text-white transition-colors disabled:cursor-not-allowed '
+            + (
+              actionLoading
+                === editing.department_id
+                ? 'bg-violet-400'
+                : 'bg-violet-600 hover:bg-violet-700'
+            )
+          }
+        >
+          {
+            actionLoading
+              === editing.department_id
+              ? (
+                <>
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                  Saving...
+                </>
+              )
+              : 'Save Changes'
+          }
+        </button>
+      </form>
+    )
+
+
   return (
     <section>
       <PageHeading
@@ -2906,19 +3992,35 @@ function DepartmentsPage({
           <button
             type="button"
             onClick={() => {
-              setShowCreate(
-                (current) =>
-                  !current,
-              )
-              setEditing(null)
+              if (showCreate) {
+                closeDepartmentCreateForm()
+              } else {
+                setShowCreate(true)
+                setEditing(null)
+              }
             }}
-            className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-[9px] font-semibold text-white"
+            disabled={
+              actionLoading
+              === 'CREATE'
+            }
+            className={
+              showCreate
+                ? 'rounded-xl border border-slate-200 bg-white px-5 py-3 text-[9px] font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50'
+                : 'flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-[9px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50'
+            }
           >
-            <Icon
-              name="plus"
-              className="h-4 w-4"
-            />
-            Add Department
+            {!showCreate && (
+              <Icon
+                name="plus"
+                className="h-4 w-4"
+              />
+            )}
+
+            {
+              showCreate
+                ? 'Close'
+                : 'Add Department'
+            }
           </button>
         }
       />
@@ -2970,9 +4072,31 @@ function DepartmentsPage({
           }
           className="mt-4 rounded-2xl border border-blue-100 bg-white p-5"
         >
-          <h2 className="text-[14px] font-bold">
-            Add department
-          </h2>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-[14px] font-bold">
+                Add department
+              </h2>
+
+              <p className="mt-1 text-[8px] text-slate-500">
+                Create a department record for routing, access and workload management.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={
+                closeDepartmentCreateForm
+              }
+              disabled={
+                actionLoading
+                === 'CREATE'
+              }
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[9px] font-semibold text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
 
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             <input
@@ -3034,107 +4158,40 @@ function DepartmentsPage({
             className="mt-3 w-full rounded-xl border border-slate-200 p-3 text-[9px]"
           />
 
-          <button
-            type="submit"
-            disabled={
-              actionLoading
-              === 'CREATE'
-            }
-            className="mt-3 rounded-xl bg-blue-600 px-5 py-2.5 text-[9px] font-semibold text-white disabled:opacity-50"
-          >
-            Create Department
-          </button>
-        </form>
-      )}
-
-      {editing && (
-        <form
-          onSubmit={
-            submitEdit
-          }
-          className="mt-4 rounded-2xl border border-violet-100 bg-white p-5"
-        >
-          <div className="flex justify-between">
-            <h2 className="text-[14px] font-bold">
-              Edit department
-            </h2>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="submit"
+              disabled={
+                actionLoading
+                === 'CREATE'
+              }
+              className="rounded-xl bg-blue-600 px-5 py-2.5 text-[9px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {
+                actionLoading
+                  === 'CREATE'
+                  ? 'Creating...'
+                  : 'Create Department'
+              }
+            </button>
 
             <button
               type="button"
-              onClick={() =>
-                setEditing(null)
+              onClick={
+                closeDepartmentCreateForm
               }
-              className="text-[9px] font-semibold text-slate-500"
+              disabled={
+                actionLoading
+                === 'CREATE'
+              }
+              className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-[9px] font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Cancel
             </button>
           </div>
-
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
-            <input
-              required
-              value={
-                editForm.department_name
-              }
-              onChange={
-                (event) =>
-                  setEditForm(
-                    (current) => ({
-                      ...current,
-                      department_name:
-                        event.target.value,
-                    }),
-                  )
-              }
-              className="h-10 rounded-xl border border-slate-200 px-3 text-[9px]"
-            />
-
-            <input
-              required
-              type="email"
-              value={
-                editForm.department_email
-              }
-              onChange={
-                (event) =>
-                  setEditForm(
-                    (current) => ({
-                      ...current,
-                      department_email:
-                        event.target.value,
-                    }),
-                  )
-              }
-              className="h-10 rounded-xl border border-slate-200 px-3 text-[9px]"
-            />
-          </div>
-
-          <textarea
-            value={
-              editForm.description
-            }
-            onChange={
-              (event) =>
-                setEditForm(
-                  (current) => ({
-                    ...current,
-                    description:
-                      event.target.value,
-                  }),
-                )
-            }
-            rows={3}
-            className="mt-3 w-full rounded-xl border border-slate-200 p-3 text-[9px]"
-          />
-
-          <button
-            type="submit"
-            className="mt-3 rounded-xl bg-violet-600 px-5 py-2.5 text-[9px] font-semibold text-white"
-          >
-            Save Changes
-          </button>
         </form>
       )}
+
 
       <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white">
         <div className="overflow-x-auto">
@@ -3165,103 +4222,143 @@ function DepartmentsPage({
             <tbody>
               {departments.map(
                 (department) => (
-                  <tr
+                  <Fragment
                     key={
                       department.department_id
                     }
-                    className="border-b border-slate-100 text-[9px]"
                   >
-                    <td className="px-4 py-4">
-                      <p className="font-bold">
-                        {
-                          department.department_name
-                        }
-                      </p>
-
-                      <p className="mt-1 text-[7px] text-slate-400">
-                        {
-                          department.department_email
-                        }
-                      </p>
-
-                      <p className="mt-1 max-w-[320px] text-[7px] text-slate-500">
-                        {
-                          department.description
-                          || 'No description'
-                        }
-                      </p>
-                    </td>
-
-                    <td className="px-4 py-4 font-bold">
-                      {
-                        department.active_users
+                    <tr
+                      key={
+                        department.department_id
                       }
-                    </td>
-
-                    <td className="px-4 py-4 font-bold">
-                      {
-                        department.active_routing_rules
-                      }
-                    </td>
-
-                    <td className="px-4 py-4 font-bold">
-                      {
-                        department.active_queries
-                      }
-                    </td>
-
-                    <td className="px-4 py-4">
-                      <ActiveBadge
-                        active={
-                          department.is_active
-                        }
-                      />
-                    </td>
-
-                    <td className="px-4 py-4">
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            startEdit(
-                              department,
-                            )
-                          }
-                          className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[8px] font-semibold text-blue-700"
-                        >
-                          Edit
-                        </button>
-
-                        <button
-                          type="button"
-                          disabled={
-                            Boolean(
-                              actionLoading,
-                            )
-                          }
-                          onClick={() =>
-                            toggleDepartment(
-                              department,
-                            )
-                          }
-                          className={
-                            'rounded-lg border px-3 py-2 text-[8px] font-semibold disabled:opacity-50 '
-                            + (
-                              department.is_active
-                                ? 'border-rose-200 bg-rose-50 text-rose-700'
-                                : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                            )
-                          }
-                        >
+                      className="border-b border-slate-100 text-[9px]"
+                    >
+                      <td className="px-4 py-4">
+                        <p className="font-bold">
                           {
-                            department.is_active
-                              ? 'Deactivate'
-                              : 'Reactivate'
+                            department.department_name
                           }
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                        </p>
+
+                        <p className="mt-1 text-[7px] text-slate-400">
+                          {
+                            department.department_email
+                          }
+                        </p>
+
+                        <p className="mt-1 max-w-[320px] text-[7px] text-slate-500">
+                          {
+                            department.description
+                            || 'No description'
+                          }
+                        </p>
+                      </td>
+
+                      <td className="px-4 py-4 font-bold">
+                        {
+                          department.active_users
+                        }
+                      </td>
+
+                      <td className="px-4 py-4 font-bold">
+                        {
+                          department.active_routing_rules
+                        }
+                      </td>
+
+                      <td className="px-4 py-4 font-bold">
+                        {
+                          department.active_queries
+                        }
+                      </td>
+
+                      <td className="px-4 py-4">
+                        <ActiveBadge
+                          active={
+                            department.is_active
+                          }
+                        />
+                      </td>
+
+                      <td className="px-4 py-4">
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            disabled={
+                              Boolean(
+                                actionLoading,
+                              )
+                            }
+                            onClick={() =>
+                              startEdit(
+                                department,
+                              )
+                            }
+                            className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[8px] font-semibold text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Edit
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={
+                              Boolean(
+                                actionLoading,
+                              )
+                            }
+                            onClick={() =>
+                              toggleDepartment(
+                                department,
+                              )
+                            }
+                            className={
+                              'inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[8px] font-semibold disabled:opacity-50 '
+                              + (
+                                department.is_active
+                                  ? 'border-rose-200 bg-rose-50 text-rose-700'
+                                  : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                              )
+                            }
+                          >
+                            {
+                              actionLoading
+                                === department.department_id
+                                ? (
+                                  <>
+                                    <span className="h-2.5 w-2.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                                    {
+                                      department.is_active
+                                        ? 'Deactivating...'
+                                        : 'Reactivating...'
+                                    }
+                                  </>
+                                )
+                                : (
+                                  department.is_active
+                                    ? 'Deactivate'
+                                    : 'Reactivate'
+                                )
+                            }
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+
+                    {
+                      editing?.department_id
+                      === department.department_id
+                      && (
+                        <tr className="border-b border-violet-100 bg-violet-50/30">
+                          <td
+                            colSpan="6"
+                            className="px-4 pb-4"
+                          >
+                            {renderDepartmentEditForm()}
+                          </td>
+                        </tr>
+                      )
+                    }
+                  </Fragment>
                 ),
               )}
             </tbody>
@@ -3357,6 +4454,21 @@ function RoutingRulesPage({
   )
 
 
+  const closeCreateRule = () => {
+    if (
+      actionLoading
+      === 'CREATE'
+    ) {
+      return
+    }
+
+    setShowCreate(false)
+    setCreateForm(
+      emptyForm,
+    )
+  }
+
+
   const loadRules =
     useCallback(
       async (
@@ -3366,21 +4478,11 @@ function RoutingRulesPage({
         setErrorMessage('')
 
         try {
-          const [
-            ruleData,
-            optionData,
-          ] =
-            await Promise.all([
-              getAdminRoutingRules(
-                accessToken,
-                signal,
-              ),
-
-              getAdminRoutingOptions(
-                accessToken,
-                signal,
-              ),
-            ])
+          const ruleData =
+            await getAdminRoutingRules(
+              accessToken,
+              signal,
+            )
 
           if (
             signal?.aborted
@@ -3395,6 +4497,47 @@ function RoutingRulesPage({
               ? ruleData.items
               : [],
           )
+        } catch (error) {
+          if (
+            error?.name
+            !== 'AbortError'
+          ) {
+            setErrorMessage(
+              error.message
+              || 'Routing rules could not be loaded.',
+            )
+          }
+        } finally {
+          if (
+            !signal?.aborted
+          ) {
+            setLoading(false)
+          }
+        }
+      },
+      [
+        accessToken,
+      ],
+    )
+
+
+  const loadRoutingOptions =
+    useCallback(
+      async (
+        signal,
+      ) => {
+        try {
+          const optionData =
+            await getAdminRoutingOptions(
+              accessToken,
+              signal,
+            )
+
+          if (
+            signal?.aborted
+          ) {
+            return
+          }
 
           setOptions({
             categories:
@@ -3425,14 +4568,8 @@ function RoutingRulesPage({
           ) {
             setErrorMessage(
               error.message
-              || 'Routing rules could not be loaded.',
+              || 'Routing configuration options could not be loaded.',
             )
-          }
-        } finally {
-          if (
-            !signal?.aborted
-          ) {
-            setLoading(false)
           }
         }
       },
@@ -3465,6 +4602,32 @@ function RoutingRulesPage({
   }, [
     loadRules,
   ])
+
+
+  useEffect(() => {
+    const controller =
+      new AbortController()
+
+    const timer =
+      window.setTimeout(
+        () => {
+          void loadRoutingOptions(
+            controller.signal,
+          )
+        },
+        0,
+      )
+
+    return () => {
+      window.clearTimeout(
+        timer,
+      )
+      controller.abort()
+    }
+  }, [
+    loadRoutingOptions,
+  ])
+
 
 
   const parseExpression =
@@ -3505,6 +4668,72 @@ function RoutingRulesPage({
       )
 
 
+  const sortRoutingRows =
+    (rows) =>
+      [...rows].sort(
+        (
+          left,
+          right,
+        ) => {
+          const activeDifference =
+            Number(
+              Boolean(
+                right?.is_active,
+              ),
+            )
+            - Number(
+              Boolean(
+                left?.is_active,
+              ),
+            )
+
+          if (activeDifference) {
+            return activeDifference
+          }
+
+          const priorityDifference =
+            numberOf(
+              left?.priority_order,
+            )
+            - numberOf(
+              right?.priority_order,
+            )
+
+          if (priorityDifference) {
+            return priorityDifference
+          }
+
+          return String(
+            left?.rule_code
+            || '',
+          ).localeCompare(
+            String(
+              right?.rule_code
+              || '',
+            ),
+          )
+        },
+      )
+
+
+  const mergeRuleIntoList =
+    (nextRule) => {
+      setRules(
+        (current) =>
+          sortRoutingRows(
+            [
+              ...current.filter(
+                (item) =>
+                  item.rule_id
+                  !== nextRule.rule_id,
+              ),
+              nextRule,
+            ],
+          ),
+      )
+    }
+
+
   const submitCreate =
     async (
       event,
@@ -3523,35 +4752,40 @@ function RoutingRulesPage({
             createForm.rule_expression,
           )
 
-        await createAdminRoutingRule(
-          accessToken,
-          {
-            rule_code:
-              createForm.rule_code,
+        const createdRule =
+          await createAdminRoutingRule(
+            accessToken,
+            {
+              rule_code:
+                createForm.rule_code,
 
-            category_id:
-              createForm.category_id,
+              category_id:
+                createForm.category_id,
 
-            department_id:
-              createForm.department_id,
+              department_id:
+                createForm.department_id,
 
-            desk_id:
-              createForm.desk_id
-              || null,
+              desk_id:
+                createForm.desk_id
+                || null,
 
-            target_role:
-              createForm.target_role,
+              target_role:
+                createForm.target_role,
 
-            priority_order:
-              Number(
-                createForm.priority_order,
-              ),
+              priority_order:
+                Number(
+                  createForm.priority_order,
+                ),
 
-            rule_expression:
-              expression,
+              rule_expression:
+                expression,
 
-            is_active: true,
-          },
+              is_active: true,
+            },
+          )
+
+        mergeRuleIntoList(
+          createdRule,
         )
 
         setCreateForm(
@@ -3563,8 +4797,6 @@ function RoutingRulesPage({
         setSuccessMessage(
           'Routing rule created successfully.',
         )
-
-        await loadRules()
       } catch (error) {
         setErrorMessage(
           error.message
@@ -3635,34 +4867,39 @@ function RoutingRulesPage({
             editForm.rule_expression,
           )
 
-        await updateAdminRoutingRule(
-          accessToken,
-          editing.rule_id,
-          {
-            rule_code:
-              editForm.rule_code,
+        const updatedRule =
+          await updateAdminRoutingRule(
+            accessToken,
+            editing.rule_id,
+            {
+              rule_code:
+                editForm.rule_code,
 
-            category_id:
-              editForm.category_id,
+              category_id:
+                editForm.category_id,
 
-            department_id:
-              editForm.department_id,
+              department_id:
+                editForm.department_id,
 
-            desk_id:
-              editForm.desk_id
-              || null,
+              desk_id:
+                editForm.desk_id
+                || null,
 
-            target_role:
-              editForm.target_role,
+              target_role:
+                editForm.target_role,
 
-            priority_order:
-              Number(
-                editForm.priority_order,
-              ),
+              priority_order:
+                Number(
+                  editForm.priority_order,
+                ),
 
-            rule_expression:
-              expression,
-          },
+              rule_expression:
+                expression,
+            },
+          )
+
+        mergeRuleIntoList(
+          updatedRule,
         )
 
         setEditing(null)
@@ -3670,8 +4907,6 @@ function RoutingRulesPage({
         setSuccessMessage(
           'Routing rule updated successfully.',
         )
-
-        await loadRules()
       } catch (error) {
         setErrorMessage(
           error.message
@@ -3709,13 +4944,18 @@ function RoutingRulesPage({
       setSuccessMessage('')
 
       try {
-        await updateAdminRoutingRule(
-          accessToken,
-          rule.rule_id,
-          {
-            is_active:
-              nextActive,
-          },
+        const updatedRule =
+          await updateAdminRoutingRule(
+            accessToken,
+            rule.rule_id,
+            {
+              is_active:
+                nextActive,
+            },
+          )
+
+        mergeRuleIntoList(
+          updatedRule,
         )
 
         setSuccessMessage(
@@ -3723,8 +4963,6 @@ function RoutingRulesPage({
             ? 'Routing rule activated.'
             : 'Routing rule deactivated.',
         )
-
-        await loadRules()
       } catch (error) {
         setErrorMessage(
           error.message
@@ -3771,20 +5009,36 @@ function RoutingRulesPage({
             </p>
           </div>
 
-          {editingMode && (
-            <button
-              type="button"
-              onClick={() =>
+          <button
+            type="button"
+            disabled={
+              Boolean(
+                actionLoading,
+              )
+            }
+            onClick={() => {
+              if (editingMode) {
                 setEditing(null)
+                return
               }
-              className="text-[9px] font-semibold text-slate-500"
-            >
-              Cancel
-            </button>
-          )}
+
+              closeCreateRule()
+            }}
+            className="rounded-lg px-3 py-2 text-[9px] font-semibold text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Cancel
+          </button>
         </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <div className="mt-4 grid gap-2 text-[7px] font-bold uppercase tracking-wide text-slate-400 md:grid-cols-2 xl:grid-cols-5">
+          <span>Rule code</span>
+          <span>Category</span>
+          <span>Department</span>
+          <span>Desk (optional)</span>
+          <span>Target role</span>
+        </div>
+
+        <div className="mt-1 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
           <input
             required
             value={
@@ -3956,66 +5210,121 @@ function RoutingRulesPage({
             <option value="HOD">
               HOD
             </option>
+            <option value="ADMIN">
+              Administrator
+            </option>
           </select>
         </div>
 
-        <div className="mt-3 grid gap-3 md:grid-cols-[160px_1fr]">
-          <input
-            required
-            min="1"
-            type="number"
-            value={
-              form.priority_order
-            }
-            onChange={
-              (event) =>
-                setForm(
-                  (current) => ({
-                    ...current,
-                    priority_order:
-                      event.target.value,
-                  }),
-                )
-            }
-            placeholder="Priority order"
-            className="h-10 rounded-xl border border-slate-200 px-3 text-[9px]"
-          />
+        <div className="mt-3 grid gap-3 md:grid-cols-[180px_1fr]">
+          <label className="block">
+            <span className="mb-1 block text-[7px] font-bold uppercase tracking-wide text-slate-400">
+              Priority order
+            </span>
 
-          <textarea
-            rows={3}
-            value={
-              form.rule_expression
-            }
-            onChange={
-              (event) =>
-                setForm(
-                  (current) => ({
-                    ...current,
-                    rule_expression:
-                      event.target.value,
-                  }),
-                )
-            }
-            placeholder='Rule expression, e.g. {}'
-            className="rounded-xl border border-slate-200 p-3 font-mono text-[8px]"
-          />
+            <input
+              required
+              min="1"
+              type="number"
+              value={
+                form.priority_order
+              }
+              onChange={
+                (event) =>
+                  setForm(
+                    (current) => ({
+                      ...current,
+                      priority_order:
+                        event.target.value,
+                    }),
+                  )
+              }
+              placeholder="1"
+              className="h-10 w-full rounded-xl border border-slate-200 px-3 text-[9px]"
+            />
+
+            <span className="mt-1 block text-[7px] leading-3 text-slate-400">
+              Lower numbers are evaluated first.
+            </span>
+          </label>
+
+          <label className="block">
+            <span className="mb-1 block text-[7px] font-bold uppercase tracking-wide text-slate-400">
+              Advanced conditions (optional)
+            </span>
+
+            <textarea
+              rows={3}
+              value={
+                form.rule_expression
+              }
+              onChange={
+                (event) =>
+                  setForm(
+                    (current) => ({
+                      ...current,
+                      rule_expression:
+                        event.target.value,
+                    }),
+                  )
+              }
+              placeholder="{}"
+              className="w-full rounded-xl border border-slate-200 p-3 font-mono text-[8px]"
+            />
+
+            <span className="mt-1 block text-[7px] leading-3 text-slate-400">
+              Leave as {'{}'} when this rule does not need extra JSON conditions.
+            </span>
+          </label>
         </div>
 
-        <button
-          type="submit"
-          disabled={
-            Boolean(
-              actionLoading,
-            )
-          }
-          className="mt-3 rounded-xl bg-blue-600 px-5 py-2.5 text-[9px] font-semibold text-white disabled:opacity-50"
-        >
-          {
-            editingMode
-              ? 'Save Rule'
-              : 'Create Rule'
-          }
-        </button>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            type="submit"
+            disabled={
+              Boolean(
+                actionLoading,
+              )
+            }
+            className="rounded-xl bg-blue-600 px-5 py-2.5 text-[9px] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {
+              editingMode
+                ? (
+                  actionLoading
+                    === editing?.rule_id
+                    ? 'Saving...'
+                    : 'Save Rule'
+                )
+                : (
+                  actionLoading
+                    === 'CREATE'
+                    ? 'Creating...'
+                    : 'Create Rule'
+                )
+            }
+          </button>
+
+          <button
+            type="button"
+            disabled={
+              Boolean(
+                actionLoading,
+              )
+            }
+            onClick={() => {
+              if (editingMode) {
+                setEditing(null)
+                return
+              }
+
+              closeCreateRule()
+            }}
+            className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-[9px] font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Cancel
+          </button>
+        </div>
       </form>
     )
 
@@ -4029,20 +5338,44 @@ function RoutingRulesPage({
         action={
           <button
             type="button"
+            disabled={
+              actionLoading
+              === 'CREATE'
+            }
             onClick={() => {
-              setShowCreate(
-                (current) =>
-                  !current,
-              )
+              if (showCreate) {
+                closeCreateRule()
+                return
+              }
+
               setEditing(null)
+              setCreateForm(
+                emptyForm,
+              )
+              setShowCreate(true)
             }}
-            className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-[9px] font-semibold text-white"
+            className={
+              'flex items-center gap-2 rounded-xl px-5 py-3 text-[9px] font-semibold disabled:cursor-not-allowed disabled:opacity-50 '
+              + (
+                showCreate
+                  ? 'border border-slate-200 bg-white text-slate-600'
+                  : 'bg-blue-600 text-white'
+              )
+            }
           >
             <Icon
               name="plus"
-              className="h-4 w-4"
+              className={
+                showCreate
+                  ? 'h-4 w-4 rotate-45'
+                  : 'h-4 w-4'
+              }
             />
-            Add Rule
+            {
+              showCreate
+                ? 'Close'
+                : 'Add Rule'
+            }
           </button>
         }
       />
@@ -4095,17 +5428,19 @@ function RoutingRulesPage({
           false,
         )}
 
-      {editing
-        && renderRuleForm(
-          editForm,
-          setEditForm,
-          submitEdit,
-          true,
-        )}
-
       <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1050px]">
+        <div className="w-full">
+          <table className="w-full table-fixed">
+            <colgroup>
+              <col className="w-[18%]" />
+              <col className="w-[15%]" />
+              <col className="w-[20%]" />
+              <col className="w-[14%]" />
+              <col className="w-[8%]" />
+              <col className="w-[10%]" />
+              <col className="w-[15%]" />
+            </colgroup>
+
             <thead>
               <tr className="bg-slate-50 text-left text-[7px] font-bold uppercase text-slate-400">
                 <th className="px-4 py-3">
@@ -4135,119 +5470,166 @@ function RoutingRulesPage({
             <tbody>
               {rules.map(
                 (rule) => (
-                  <tr
+                  <Fragment
                     key={
                       rule.rule_id
                     }
-                    className="border-b border-slate-100 text-[9px]"
                   >
-                    <td className="px-4 py-4">
-                      <p className="font-mono font-bold text-blue-700">
-                        {
-                          rule.rule_code
-                        }
-                      </p>
-
-                      <p className="mt-1 text-[7px] text-slate-400">
-                        Created {
-                          formatDate(
-                            rule.created_at,
-                          )
-                        }
-                      </p>
-                    </td>
-
-                    <td className="px-4 py-4">
-                      <p className="font-semibold">
-                        {
-                          rule.category_name
-                        }
-                      </p>
-
-                      <p className="mt-1 font-mono text-[7px] text-slate-400">
-                        {
-                          rule.category_code
-                        }
-                      </p>
-                    </td>
-
-                    <td className="px-4 py-4">
-                      <p className="font-semibold">
-                        {
-                          rule.department_name
-                        }
-                      </p>
-
-                      <p className="mt-1 text-[7px] text-slate-400">
-                        {
-                          rule.desk_name
-                          || 'Department level'
-                        }
-                      </p>
-                    </td>
-
-                    <td className="px-4 py-4">
-                      <ValueBadge
-                        value={
-                          rule.target_role
-                        }
-                      />
-                    </td>
-
-                    <td className="px-4 py-4 font-bold">
-                      {
-                        rule.priority_order
+                    <tr
+                      key={
+                        rule.rule_id
                       }
-                    </td>
-
-                    <td className="px-4 py-4">
-                      <ActiveBadge
-                        active={
-                          rule.is_active
-                        }
-                      />
-                    </td>
-
-                    <td className="px-4 py-4">
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            startEdit(rule)
-                          }
-                          className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[8px] font-semibold text-blue-700"
-                        >
-                          Edit
-                        </button>
-
-                        <button
-                          type="button"
-                          disabled={
-                            Boolean(
-                              actionLoading,
-                            )
-                          }
-                          onClick={() =>
-                            toggleRule(rule)
-                          }
-                          className={
-                            'rounded-lg border px-3 py-2 text-[8px] font-semibold disabled:opacity-50 '
-                            + (
-                              rule.is_active
-                                ? 'border-rose-200 bg-rose-50 text-rose-700'
-                                : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                            )
-                          }
-                        >
+                      className="border-b border-slate-100 text-[9px]"
+                    >
+                      <td className="px-4 py-4">
+                        <p className="font-mono font-bold text-blue-700">
                           {
-                            rule.is_active
-                              ? 'Deactivate'
-                              : 'Activate'
+                            rule.rule_code
                           }
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                        </p>
+
+                        <p className="mt-1 text-[7px] text-slate-400">
+                          Created {
+                            formatDate(
+                              rule.created_at,
+                            )
+                          }
+                        </p>
+                      </td>
+
+                      <td className="px-4 py-4">
+                        <p className="font-semibold">
+                          {
+                            rule.category_name
+                          }
+                        </p>
+
+                        <p className="mt-1 font-mono text-[7px] text-slate-400">
+                          {
+                            rule.category_code
+                          }
+                        </p>
+                      </td>
+
+                      <td className="px-4 py-4">
+                        <p className="font-semibold">
+                          {
+                            rule.department_name
+                          }
+                        </p>
+
+                        <p className="mt-1 text-[7px] text-slate-400">
+                          {
+                            rule.desk_name
+                            || 'Department level'
+                          }
+                        </p>
+                      </td>
+
+                      <td className="px-4 py-4">
+                        <ValueBadge
+                          value={
+                            rule.target_role
+                          }
+                        />
+                      </td>
+
+                      <td className="px-4 py-4 font-bold">
+                        {
+                          rule.priority_order
+                        }
+                      </td>
+
+                      <td className="px-4 py-4">
+                        <ActiveBadge
+                          active={
+                            rule.is_active
+                          }
+                        />
+                      </td>
+
+                      <td className="px-4 py-4">
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            disabled={
+                              Boolean(
+                                actionLoading,
+                              )
+                            }
+                            onClick={() =>
+                              startEdit(rule)
+                            }
+                            className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[8px] font-semibold text-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Edit
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={
+                              Boolean(
+                                actionLoading,
+                              )
+                            }
+                            onClick={() =>
+                              toggleRule(rule)
+                            }
+                            className={
+                              'inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[8px] font-semibold disabled:opacity-50 '
+                              + (
+                                rule.is_active
+                                  ? 'border-rose-200 bg-rose-50 text-rose-700'
+                                  : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                              )
+                            }
+                          >
+                            {
+                              actionLoading
+                                === rule.rule_id
+                                ? (
+                                  <>
+                                    <span className="h-2.5 w-2.5 animate-spin rounded-full border-2 border-current/30 border-t-current" />
+                                    {
+                                      rule.is_active
+                                        ? 'Deactivating...'
+                                        : 'Activating...'
+                                    }
+                                  </>
+                                )
+                                : (
+                                  rule.is_active
+                                    ? 'Deactivate'
+                                    : 'Activate'
+                                )
+                            }
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+
+                    {
+                      editing?.rule_id
+                      === rule.rule_id
+                      && (
+                        <tr className="border-b border-violet-100 bg-violet-50/30">
+                          <td
+                            colSpan="7"
+                            className="px-4 pb-4"
+                          >
+                            {
+                              renderRuleForm(
+                                editForm,
+                                setEditForm,
+                                submitEdit,
+                                true,
+                              )
+                            }
+                          </td>
+                        </tr>
+                      )
+                    }
+                  </Fragment>
                 ),
               )}
             </tbody>
@@ -4374,6 +5756,17 @@ function AnnouncementsPage({
         accessToken,
       ],
     )
+
+  const refreshAnnouncements = () => {
+    if (loading) {
+      return
+    }
+
+    setSuccessMessage('')
+    setErrorMessage('')
+
+    void loadAnnouncements()
+  }
 
 
   useEffect(() => {
@@ -4580,16 +5973,21 @@ function AnnouncementsPage({
           <div className="flex gap-2">
             <button
               type="button"
-              onClick={() =>
-                setRefreshVersion(
-                  (current) =>
-                    current + 1,
-                )
+              onClick={
+                refreshAnnouncements
               }
               disabled={loading}
-              className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-[9px] font-semibold text-slate-700 disabled:opacity-50"
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-[9px] font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              Refresh
+              {loading ? (
+                <>
+                  <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />
+
+                  Refreshing...
+                </>
+              ) : (
+                'Refresh'
+              )}
             </button>
 
             <button
@@ -5072,6 +6470,11 @@ function AuditLogsPage({
   ] = useState(1)
 
   const [
+    pageSize,
+    setPageSize,
+  ] = useState(10)
+
+  const [
     loading,
     setLoading,
   ] = useState(true)
@@ -5100,7 +6503,8 @@ function AuditLogsPage({
                   entityType,
                 outcome,
                 page,
-                page_size: 25,
+                page_size:
+                  pageSize,
               },
               signal,
             )
@@ -5157,6 +6561,7 @@ function AuditLogsPage({
         entityType,
         outcome,
         page,
+        pageSize,
         search,
       ],
     )
@@ -5187,6 +6592,23 @@ function AuditLogsPage({
   ])
 
 
+  const firstVisible =
+    data.total === 0
+      ? 0
+      : (
+          (
+            data.page - 1
+          ) * pageSize
+          + 1
+        )
+
+  const lastVisible =
+    Math.min(
+      data.page * pageSize,
+      data.total,
+    )
+
+
   return (
     <section>
       <PageHeading
@@ -5207,7 +6629,7 @@ function AuditLogsPage({
         <MetricCard
           title="Current Page"
           value={data.page}
-          subtitle="Newest events first"
+          subtitle={`${pageSize} rows per page`}
           symbol="#"
           tone="violet"
         />
@@ -5273,6 +6695,9 @@ function AuditLogsPage({
             <option value="RESPONSE">
               Responses
             </option>
+            <option value="ANNOUNCEMENT">
+              Announcements
+            </option>
           </select>
 
           <select
@@ -5297,28 +6722,51 @@ function AuditLogsPage({
               Failed
             </option>
           </select>
+
+          {
+            loading
+            && data.items.length > 0
+            && (
+              <div
+                aria-live="polite"
+                className="ml-auto inline-flex h-10 items-center gap-2 rounded-xl bg-blue-50 px-3 text-[8px] font-semibold text-blue-700"
+              >
+                <span className="h-3 w-3 animate-spin rounded-full border-2 border-blue-200 border-t-blue-600" />
+                Updating...
+              </div>
+            )
+          }
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1100px]">
+        <div className="w-full overflow-hidden">
+          <table className="w-full table-fixed">
+            <colgroup>
+              <col className="w-[8%]" />
+              <col className="w-[20%]" />
+              <col className="w-[21%]" />
+              <col className="w-[23%]" />
+              <col className="w-[11%]" />
+              <col className="w-[17%]" />
+            </colgroup>
+
             <thead>
               <tr className="bg-slate-50 text-left text-[7px] font-bold uppercase text-slate-400">
-                <th className="px-4 py-3">
+                <th className="px-3 py-3">
                   Sequence
                 </th>
-                <th className="px-4 py-3">
+                <th className="px-3 py-3">
                   Actor
                 </th>
-                <th className="px-4 py-3">
+                <th className="px-3 py-3">
                   Action
                 </th>
-                <th className="px-4 py-3">
+                <th className="px-3 py-3">
                   Entity
                 </th>
-                <th className="px-4 py-3">
+                <th className="px-3 py-3">
                   Outcome
                 </th>
-                <th className="px-4 py-3">
+                <th className="px-3 py-3">
                   Time
                 </th>
               </tr>
@@ -5331,14 +6779,16 @@ function AuditLogsPage({
                     key={
                       item.audit_id
                     }
-                    className="border-b border-slate-100 text-[9px]"
+                    className="border-b border-slate-100 align-top text-[8px]"
                   >
-                    <td className="px-4 py-4 font-mono font-bold">
-                      #{item.event_sequence}
+                    <td className="px-3 py-4 font-mono font-bold">
+                      <span className="break-all">
+                        #{item.event_sequence}
+                      </span>
                     </td>
 
-                    <td className="px-4 py-4">
-                      <p className="font-semibold">
+                    <td className="px-3 py-4">
+                      <p className="break-words font-semibold leading-4">
                         {
                           item.actor_name
                           || item.actor_service
@@ -5346,7 +6796,7 @@ function AuditLogsPage({
                         }
                       </p>
 
-                      <p className="mt-1 text-[7px] text-slate-400">
+                      <p className="mt-1 break-all text-[7px] leading-3 text-slate-400">
                         {
                           item.actor_email
                           || item.actor_service
@@ -5355,8 +6805,8 @@ function AuditLogsPage({
                       </p>
                     </td>
 
-                    <td className="px-4 py-4">
-                      <p className="font-semibold">
+                    <td className="px-3 py-4">
+                      <p className="break-words font-semibold leading-4">
                         {
                           prettyText(
                             item.action,
@@ -5365,7 +6815,7 @@ function AuditLogsPage({
                       </p>
                     </td>
 
-                    <td className="px-4 py-4">
+                    <td className="px-3 py-4">
                       <ValueBadge
                         value={
                           item.entity_type
@@ -5373,7 +6823,7 @@ function AuditLogsPage({
                       />
 
                       {item.entity_id && (
-                        <p className="mt-1 max-w-[180px] truncate font-mono text-[7px] text-slate-400">
+                        <p className="mt-1 break-all font-mono text-[7px] leading-3 text-slate-400">
                           {
                             item.entity_id
                           }
@@ -5381,7 +6831,7 @@ function AuditLogsPage({
                       )}
                     </td>
 
-                    <td className="px-4 py-4">
+                    <td className="px-3 py-4">
                       <ValueBadge
                         value={
                           item.outcome
@@ -5389,7 +6839,7 @@ function AuditLogsPage({
                       />
                     </td>
 
-                    <td className="px-4 py-4 text-slate-500">
+                    <td className="px-3 py-4 break-words leading-4 text-slate-500">
                       {
                         formatDate(
                           item.created_at,
@@ -5419,38 +6869,109 @@ function AuditLogsPage({
           </table>
         </div>
 
-        {loading && (
-          <div className="py-5 text-center text-[9px] text-slate-500">
-            Loading audit events...
-          </div>
-        )}
+        {
+          loading
+          && data.items.length === 0
+          && (
+            <div className="flex items-center justify-center gap-2 border-t border-slate-100 py-4 text-[9px] text-slate-500">
+              <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-200 border-t-blue-600" />
+              Loading audit events...
+            </div>
+          )
+        }
 
-        <Pagination
-          page={
-            data.page
-          }
-          totalPages={
-            data.total_pages
-          }
-          onPrevious={() =>
-            setPage(
-              (current) =>
-                Math.max(
-                  1,
-                  current - 1,
-                ),
-            )
-          }
-          onNext={() =>
-            setPage(
-              (current) =>
-                Math.min(
-                  data.total_pages,
-                  current + 1,
-                ),
-            )
-          }
-        />
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-4">
+          <div className="text-[8px] text-slate-500">
+            {
+              data.total === 0
+                ? 'Showing 0 events'
+                : `Showing ${firstVisible}-${lastVisible} of ${data.total} events`
+            }
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-[8px] font-semibold text-slate-500">
+              Rows per page
+
+              <select
+                value={pageSize}
+                onChange={
+                  (event) => {
+                    setPageSize(
+                      Number(
+                        event.target.value,
+                      ),
+                    )
+                    setPage(1)
+                  }
+                }
+                disabled={loading}
+                className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-[8px] text-slate-700 disabled:opacity-50"
+              >
+                <option value="10">
+                  10
+                </option>
+                <option value="20">
+                  20
+                </option>
+                <option value="25">
+                  25
+                </option>
+                <option value="50">
+                  50
+                </option>
+              </select>
+            </label>
+
+            <span className="text-[8px] text-slate-500">
+              Page {data.page} of {
+                data.total_pages || 1
+              }
+            </span>
+
+            <button
+              type="button"
+              disabled={
+                loading
+                || data.page <= 1
+              }
+              onClick={() =>
+                setPage(
+                  (current) =>
+                    Math.max(
+                      1,
+                      current - 1,
+                    ),
+                )
+              }
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[8px] font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Previous
+            </button>
+
+            <button
+              type="button"
+              disabled={
+                loading
+                || data.total_pages === 0
+                || data.page
+                  >= data.total_pages
+              }
+              onClick={() =>
+                setPage(
+                  (current) =>
+                    Math.min(
+                      data.total_pages,
+                      current + 1,
+                    ),
+                )
+              }
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[8px] font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
+        </div>
       </div>
     </section>
   )
@@ -5462,72 +6983,520 @@ function AuditLogsPage({
    ========================================================== */
 
 
-function IntegrationsPage() {
-  const integrations = [
-    [
-      'Gemini / LangChain',
-      'AI classification and response drafting',
-      'Configured',
-    ],
-    [
-      'Gmail',
-      'Inbound and outbound email workflow',
-      'Configured',
-    ],
-    [
-      'n8n',
-      'Workflow automation and Gmail delivery',
-      'Configured',
-    ],
-    [
-      'Supabase PostgreSQL',
-      'Primary application data store',
-      'Configured',
-    ],
-  ]
+function IntegrationsPage({
+  accessToken,
+}) {
+  const [
+    data,
+    setData,
+  ] = useState({
+    checked_at: null,
+    integrations: [],
+  })
+
+  const [
+    loading,
+    setLoading,
+  ] = useState(true)
+
+  const [
+    errorMessage,
+    setErrorMessage,
+  ] = useState('')
+
+
+  const loadIntegrations =
+    useCallback(
+      async (
+        signal,
+      ) => {
+        setLoading(true)
+        setErrorMessage('')
+
+        try {
+          const response =
+            await getAdminIntegrationStatus(
+              accessToken,
+              signal,
+            )
+
+          if (
+            signal?.aborted
+          ) {
+            return
+          }
+
+          setData({
+            checked_at:
+              response?.checked_at
+              || null,
+
+            integrations:
+              Array.isArray(
+                response?.integrations,
+              )
+                ? response.integrations
+                : [],
+          })
+        } catch (error) {
+          if (
+            error?.name
+            !== 'AbortError'
+          ) {
+            setErrorMessage(
+              error.message
+              || 'Integration status could not be loaded.',
+            )
+          }
+        } finally {
+          if (
+            !signal?.aborted
+          ) {
+            setLoading(false)
+          }
+        }
+      },
+      [
+        accessToken,
+      ],
+    )
+
+
+  useEffect(() => {
+    const controller =
+      new AbortController()
+
+    const timer =
+      window.setTimeout(
+        () => {
+          void loadIntegrations(
+            controller.signal,
+          )
+        },
+        0,
+      )
+
+    return () => {
+      window.clearTimeout(
+        timer,
+      )
+      controller.abort()
+    }
+  }, [
+    loadIntegrations,
+  ])
+
+
+  const refreshIntegrations =
+    () => {
+      if (loading) {
+        return
+      }
+
+      void loadIntegrations()
+    }
+
+
+  const statusClass =
+    (status) => {
+      if (
+        status === 'HEALTHY'
+        || status === 'OPERATIONAL'
+      ) {
+        return (
+          'bg-emerald-50 '
+          + 'text-emerald-700'
+        )
+      }
+
+      if (
+        status === 'CONFIGURED'
+      ) {
+        return (
+          'bg-blue-50 '
+          + 'text-blue-700'
+        )
+      }
+
+      if (
+        status === 'DEGRADED'
+      ) {
+        return (
+          'bg-amber-50 '
+          + 'text-amber-700'
+        )
+      }
+
+      return (
+        'bg-rose-50 '
+        + 'text-rose-700'
+      )
+    }
+
+
+  const iconClass =
+    (status) => {
+      if (
+        status === 'HEALTHY'
+        || status === 'OPERATIONAL'
+      ) {
+        return (
+          'bg-emerald-50 '
+          + 'text-emerald-600'
+        )
+      }
+
+      if (
+        status === 'CONFIGURED'
+      ) {
+        return (
+          'bg-blue-50 '
+          + 'text-blue-600'
+        )
+      }
+
+      if (
+        status === 'DEGRADED'
+      ) {
+        return (
+          'bg-amber-50 '
+          + 'text-amber-600'
+        )
+      }
+
+      return (
+        'bg-rose-50 '
+        + 'text-rose-600'
+      )
+    }
+
+
+  const metadataRows =
+    (item) => {
+      const metadata =
+        item?.metadata
+        || {}
+
+      if (
+        item?.id
+        === 'gemini'
+      ) {
+        return [
+          [
+            'Model',
+            metadata.model
+            || '—',
+          ],
+          [
+            'Last AI activity',
+            formatDate(
+              metadata
+                .last_activity_at,
+            ),
+          ],
+          [
+            'Last result',
+            prettyText(
+              metadata
+                .last_processing_status,
+            ),
+          ],
+          [
+            'Response time',
+            metadata
+              .last_response_time_ms
+              !== null
+              && metadata
+                .last_response_time_ms
+                !== undefined
+              ? `${numberOf(
+                  metadata
+                    .last_response_time_ms,
+                )} ms`
+              : '—',
+          ],
+        ]
+      }
+
+      if (
+        item?.id
+        === 'gmail'
+      ) {
+        return [
+          [
+            'Sender',
+            metadata.sender_email
+            || '—',
+          ],
+          [
+            'Last successful delivery',
+            formatDate(
+              metadata.last_sent_at,
+            ),
+          ],
+          [
+            'Gmail account',
+            metadata
+              .gmail_account_email
+            || '—',
+          ],
+        ]
+      }
+
+      if (
+        item?.id
+        === 'n8n'
+      ) {
+        return [
+          [
+            'Last callback',
+            formatDate(
+              metadata
+                .last_callback_at,
+            ),
+          ],
+          [
+            'Last workflow event',
+            prettyText(
+              metadata
+                .last_callback_action,
+            ),
+          ],
+          [
+            'Callback result',
+            prettyText(
+              metadata
+                .last_callback_outcome,
+            ),
+          ],
+        ]
+      }
+
+      return [
+        [
+          'Connection checked',
+          formatDate(
+            metadata
+              .database_checked_at,
+          ),
+        ],
+        [
+          'Supabase URL',
+          metadata
+            .supabase_url_configured
+            ? 'Configured'
+            : 'Missing',
+        ],
+        [
+          'Publishable key',
+          metadata
+            .publishable_key_configured
+            ? 'Configured'
+            : 'Missing',
+        ],
+        [
+          'Secret key',
+          metadata
+            .secret_key_configured
+            ? 'Configured'
+            : 'Missing',
+        ],
+      ]
+    }
+
+
+  const integrations =
+    Array.isArray(
+      data.integrations,
+    )
+      ? data.integrations
+      : []
+
+
+  const healthyCount =
+    integrations.filter(
+      (item) =>
+        item.status
+        === 'HEALTHY'
+        || item.status
+        === 'OPERATIONAL',
+    ).length
+
 
   return (
     <section>
       <PageHeading
         eyebrow="System Control / Integrations"
         title="Integrations"
-        subtitle="Core external services configured for SmartQuery."
+        subtitle="Live configuration and operational evidence for SmartQuery external services."
+        action={
+          <button
+            type="button"
+            onClick={
+              refreshIntegrations
+            }
+            disabled={loading}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-[9px] font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loading ? (
+              <>
+                <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />
+                Refreshing...
+              </>
+            ) : (
+              'Refresh'
+            )}
+          </button>
+        }
       />
+
+      {errorMessage && (
+        <p
+          role="alert"
+          className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-[9px] font-medium text-rose-700"
+        >
+          {errorMessage}
+        </p>
+      )}
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+        <MetricCard
+          title="Integrations"
+          value={
+            integrations.length
+          }
+          subtitle="Live services checked"
+          symbol="I"
+          tone="blue"
+        />
+
+        <MetricCard
+          title="Healthy / Operational"
+          value={
+            healthyCount
+          }
+          subtitle="Services currently available"
+          symbol="✓"
+          tone="green"
+        />
+
+        <MetricCard
+          title="Last Checked"
+          value={
+            data.checked_at
+              ? formatDate(
+                  data.checked_at,
+                )
+              : '—'
+          }
+          subtitle="Latest backend status refresh"
+          symbol="T"
+          tone="violet"
+        />
+      </div>
+
+      {loading
+        && integrations.length
+        === 0
+        && (
+          <div className="mt-5 rounded-2xl border border-slate-200 bg-white px-5 py-10 text-center text-[9px] text-slate-500">
+            Loading live integration status...
+          </div>
+        )}
 
       <div className="mt-5 grid gap-4 md:grid-cols-2">
         {integrations.map(
-          ([
-            name,
-            description,
-            status,
-          ]) => (
+          (item) => (
             <article
-              key={name}
+              key={item.id}
               className="rounded-2xl border border-slate-200 bg-white p-5"
             >
               <div className="flex items-start justify-between gap-4">
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                <div
+                  className={
+                    'flex h-11 w-11 items-center justify-center rounded-xl '
+                    + iconClass(
+                      item.status,
+                    )
+                  }
+                >
                   <Icon
                     name="plug"
                   />
                 </div>
 
-                <span className="rounded-full bg-emerald-50 px-3 py-1 text-[7px] font-bold text-emerald-700">
-                  {status}
+                <span
+                  className={
+                    'rounded-full px-3 py-1 text-[7px] font-bold '
+                    + statusClass(
+                      item.status,
+                    )
+                  }
+                >
+                  {
+                    item.status_label
+                    || prettyText(
+                      item.status,
+                    )
+                  }
                 </span>
               </div>
 
               <h2 className="mt-4 text-[14px] font-bold">
-                {name}
+                {item.name}
               </h2>
 
               <p className="mt-2 text-[9px] leading-5 text-slate-500">
-                {description}
+                {
+                  item.description
+                }
               </p>
+
+              <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2.5 text-[8px] leading-4 text-slate-600">
+                {item.detail}
+              </p>
+
+              <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+                {
+                  metadataRows(
+                    item,
+                  ).map(
+                    ([
+                      label,
+                      value,
+                    ]) => (
+                      <div
+                        key={label}
+                        className="min-w-0"
+                      >
+                        <dt className="text-[7px] font-bold uppercase tracking-wide text-slate-400">
+                          {label}
+                        </dt>
+
+                        <dd className="mt-1 break-words text-[9px] font-semibold text-slate-700">
+                          {value}
+                        </dd>
+                      </div>
+                    ),
+                  )
+                }
+              </dl>
             </article>
           ),
         )}
       </div>
+
+      {
+        !loading
+        && !errorMessage
+        && integrations.length
+        === 0
+        && (
+          <div className="mt-5 rounded-2xl border border-slate-200 bg-white px-5 py-10 text-center text-[9px] text-slate-500">
+            No integration status records were returned.
+          </div>
+        )
+      }
     </section>
   )
 }
@@ -5621,58 +7590,495 @@ function ReportsPage({
 
 function SettingsPage({
   profile,
+  accessToken,
 }) {
-  const settings = [
-    [
-      'Authentication',
-      'Google / Supabase authentication',
-      'Enabled',
-    ],
-    [
-      'Authorization',
-      'Role-based access control',
-      'Enabled',
-    ],
-    [
-      'Administrator Role',
-      roleLabel(
-        profile?.role
-        || 'ADMIN',
-      ),
-      'Active',
-    ],
-    [
-      'Audit Logging',
-      'Security-sensitive actions are stored in audit logs',
-      'Enabled',
-    ],
-    [
-      'Query Routing',
-      'Deterministic category and department rules',
-      'Enabled',
-    ],
-    [
-      'Email Automation',
-      'Gmail and n8n workflow integration',
-      'Configured',
-    ],
+  const [
+    evidence,
+    setEvidence,
+  ] = useState({
+    audit: null,
+    routing: null,
+    integrations: [],
+    checked_at: null,
+  })
+
+  const [
+    loading,
+    setLoading,
+  ] = useState(true)
+
+  const [
+    errorMessage,
+    setErrorMessage,
+  ] = useState('')
+
+
+  const loadSettings =
+    useCallback(
+      async (
+        signal,
+      ) => {
+        setLoading(true)
+        setErrorMessage('')
+
+        const [
+          auditResult,
+          routingResult,
+          integrationResult,
+        ] =
+          await Promise.allSettled([
+            getAdminAuditLogs(
+              accessToken,
+              {
+                page: 1,
+                page_size: 1,
+              },
+              signal,
+            ),
+
+            getAdminRoutingRules(
+              accessToken,
+              signal,
+            ),
+
+            getAdminIntegrationStatus(
+              accessToken,
+              signal,
+            ),
+          ])
+
+        if (
+          signal?.aborted
+        ) {
+          return
+        }
+
+        const failedChecks = [
+          auditResult,
+          routingResult,
+          integrationResult,
+        ].filter(
+          (result) =>
+            result.status
+            === 'rejected',
+        ).length
+
+        const routingItems =
+          routingResult.status
+          === 'fulfilled'
+          && Array.isArray(
+            routingResult
+              .value
+              ?.items,
+          )
+            ? routingResult
+                .value
+                .items
+            : []
+
+        const integrationItems =
+          integrationResult.status
+          === 'fulfilled'
+          && Array.isArray(
+            integrationResult
+              .value
+              ?.integrations,
+          )
+            ? integrationResult
+                .value
+                .integrations
+            : []
+
+        setEvidence({
+          audit:
+            auditResult.status
+            === 'fulfilled'
+              ? {
+                  available: true,
+                  total:
+                    numberOf(
+                      auditResult
+                        .value
+                        ?.total,
+                    ),
+                }
+              : {
+                  available: false,
+                  total: 0,
+                },
+
+          routing:
+            routingResult.status
+            === 'fulfilled'
+              ? {
+                  available: true,
+                  total:
+                    routingItems
+                      .length,
+                  active:
+                    routingItems
+                      .filter(
+                        (item) =>
+                          item
+                            .is_active,
+                      )
+                      .length,
+                }
+              : {
+                  available: false,
+                  total: 0,
+                  active: 0,
+                },
+
+          integrations:
+            integrationItems,
+
+          checked_at:
+            integrationResult.status
+            === 'fulfilled'
+              ? integrationResult
+                  .value
+                  ?.checked_at
+                || new Date()
+                  .toISOString()
+              : new Date()
+                .toISOString(),
+        })
+
+        if (failedChecks) {
+          setErrorMessage(
+            'Some system status checks could not be completed. Unavailable cards are shown below.',
+          )
+        }
+
+        setLoading(false)
+      },
+      [
+        accessToken,
+      ],
+    )
+
+
+  useEffect(() => {
+    const controller =
+      new AbortController()
+
+    const timer =
+      window.setTimeout(
+        () => {
+          void loadSettings(
+            controller.signal,
+          )
+        },
+        0,
+      )
+
+    return () => {
+      window.clearTimeout(
+        timer,
+      )
+      controller.abort()
+    }
+  }, [
+    loadSettings,
+  ])
+
+
+  const refreshSettings =
+    () => {
+      if (loading) {
+        return
+      }
+
+      void loadSettings()
+    }
+
+
+  const statusClass =
+    (status) => {
+      if (
+        [
+          'Verified',
+          'Enforced',
+          'Active',
+          'Operational',
+          'Healthy',
+        ].includes(
+          status,
+        )
+      ) {
+        return (
+          'bg-emerald-50 '
+          + 'text-emerald-700'
+        )
+      }
+
+      if (
+        status
+        === 'Configured'
+      ) {
+        return (
+          'bg-blue-50 '
+          + 'text-blue-700'
+        )
+      }
+
+      if (
+        status
+        === 'Checking'
+      ) {
+        return (
+          'bg-slate-100 '
+          + 'text-slate-600'
+        )
+      }
+
+      return (
+        'bg-rose-50 '
+        + 'text-rose-700'
+      )
+    }
+
+
+  const gmail =
+    evidence.integrations.find(
+      (item) =>
+        item.id
+        === 'gmail',
+    )
+
+  const n8n =
+    evidence.integrations.find(
+      (item) =>
+        item.id
+        === 'n8n',
+    )
+
+  const emailStatuses = [
+    gmail?.status,
+    n8n?.status,
   ]
+
+  const emailOperational =
+    emailStatuses.length === 2
+    && emailStatuses.every(
+      (status) =>
+        status
+        === 'OPERATIONAL'
+        || status
+        === 'HEALTHY',
+    )
+
+  const emailConfigured =
+    emailStatuses.length === 2
+    && emailStatuses.every(
+      (status) =>
+        [
+          'OPERATIONAL',
+          'HEALTHY',
+          'CONFIGURED',
+        ].includes(
+          status,
+        ),
+    )
+
+
+  const cards = [
+    {
+      title:
+        'Authentication',
+
+      description:
+        profile?.email
+          ? (
+              'Verified application profile loaded for '
+              + profile.email
+            )
+          : (
+              'Authenticated administrator profile is unavailable.'
+            ),
+
+      status:
+        loading
+        && !profile
+          ? 'Checking'
+          : (
+              profile?.email
+                ? 'Verified'
+                : 'Unavailable'
+            ),
+    },
+
+    {
+      title:
+        'Authorization',
+
+      description:
+        profile?.role
+        === 'ADMIN'
+          ? (
+              'Role-based access is operating under administrator permissions.'
+            )
+          : (
+              'The current profile does not have the administrator role.'
+            ),
+
+      status:
+        profile?.role
+        === 'ADMIN'
+          ? 'Enforced'
+          : 'Restricted',
+    },
+
+    {
+      title:
+        'Administrator Role',
+
+      description:
+        roleLabel(
+          profile?.role
+          || 'ADMIN',
+        ),
+
+      status:
+        profile?.role
+        === 'ADMIN'
+          ? 'Active'
+          : 'Mismatch',
+    },
+
+    {
+      title:
+        'Audit Logging',
+
+      description:
+        evidence.audit
+          ?.available
+          ? (
+              `${evidence.audit.total} audit events are currently recorded.`
+            )
+          : (
+              loading
+                ? 'Checking the authenticated audit log service.'
+                : 'Audit log evidence could not be loaded.'
+            ),
+
+      status:
+        evidence.audit
+          ?.available
+          ? 'Operational'
+          : (
+              loading
+                ? 'Checking'
+                : 'Unavailable'
+            ),
+    },
+
+    {
+      title:
+        'Query Routing',
+
+      description:
+        evidence.routing
+          ?.available
+          ? (
+              `${evidence.routing.active} active of ${evidence.routing.total} routing rules.`
+            )
+          : (
+              loading
+                ? 'Checking the live routing configuration.'
+                : 'Routing configuration evidence could not be loaded.'
+            ),
+
+      status:
+        evidence.routing
+          ?.available
+          ? (
+              evidence.routing
+                .active
+              > 0
+                ? 'Operational'
+                : 'Unavailable'
+            )
+          : (
+              loading
+                ? 'Checking'
+                : 'Unavailable'
+            ),
+    },
+
+    {
+      title:
+        'Email Automation',
+
+      description:
+        gmail
+        || n8n
+          ? (
+              `Gmail: ${gmail?.status_label || 'Unavailable'} · n8n: ${n8n?.status_label || 'Unavailable'}`
+            )
+          : (
+              loading
+                ? 'Checking Gmail and n8n workflow status.'
+                : 'Email automation evidence could not be loaded.'
+            ),
+
+      status:
+        emailOperational
+          ? 'Operational'
+          : (
+              emailConfigured
+                ? 'Configured'
+                : (
+                    loading
+                      ? 'Checking'
+                      : 'Unavailable'
+                  )
+            ),
+    },
+  ]
+
 
   return (
     <section>
       <PageHeading
         eyebrow="System Control / Settings"
         title="System settings"
-        subtitle="Review security, access and workflow configuration for the administration environment."
+        subtitle="Live security, access and workflow configuration evidence for the administration environment."
+        action={
+          <button
+            type="button"
+            onClick={
+              refreshSettings
+            }
+            disabled={loading}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-[9px] font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loading ? (
+              <>
+                <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-blue-600" />
+                Refreshing...
+              </>
+            ) : (
+              'Refresh'
+            )}
+          </button>
+        }
+      />
+
+      <ErrorMessage
+        message={
+          errorMessage
+        }
       />
 
       <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {settings.map(
-          ([
+        {cards.map(
+          ({
             title,
             description,
             status,
-          ]) => (
+          }) => (
             <article
               key={title}
               className="rounded-2xl border border-slate-200 bg-white p-5"
@@ -5685,7 +8091,14 @@ function SettingsPage({
                   />
                 </div>
 
-                <span className="rounded-full bg-emerald-50 px-3 py-1 text-[7px] font-bold text-emerald-700">
+                <span
+                  className={
+                    'rounded-full px-3 py-1 text-[7px] font-bold '
+                    + statusClass(
+                      status,
+                    )
+                  }
+                >
                   {status}
                 </span>
               </div>
@@ -5703,16 +8116,29 @@ function SettingsPage({
       </div>
 
       <article className="mt-4 rounded-2xl border border-slate-200 bg-white p-5">
-        <h2 className="text-[14px] font-bold">
-          Administrator identity
-        </h2>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <h2 className="text-[14px] font-bold">
+            Administrator identity
+          </h2>
+
+          <span className="text-[8px] text-slate-400">
+            Last checked: {
+              evidence.checked_at
+                ? formatDate(
+                    evidence.checked_at,
+                  )
+                : '—'
+            }
+          </span>
+        </div>
 
         <div className="mt-4 grid gap-4 sm:grid-cols-3">
           <div>
             <p className="text-[7px] font-bold uppercase text-slate-400">
               Name
             </p>
-            <p className="mt-1 text-[10px] font-semibold">
+
+            <p className="mt-1 break-words text-[10px] font-semibold">
               {
                 profile?.full_name
                 || 'Administrator'
@@ -5724,7 +8150,8 @@ function SettingsPage({
             <p className="text-[7px] font-bold uppercase text-slate-400">
               Email
             </p>
-            <p className="mt-1 text-[10px] font-semibold">
+
+            <p className="mt-1 break-all text-[10px] font-semibold">
               {
                 profile?.email
                 || '—'
@@ -5736,6 +8163,7 @@ function SettingsPage({
             <p className="text-[7px] font-bold uppercase text-slate-400">
               Role
             </p>
+
             <p className="mt-1 text-[10px] font-semibold">
               {
                 roleLabel(
@@ -5838,6 +8266,21 @@ function AdminDashboard({
 
 
   useEffect(() => {
+    const currentPath =
+      location.pathname
+        .replace(
+          /\/+$/,
+          '',
+        )
+      || '/admin'
+
+    if (
+      currentPath
+      !== PATHS.overview
+    ) {
+      return undefined
+    }
+
     const controller =
       new AbortController()
 
@@ -5859,6 +8302,7 @@ function AdminDashboard({
     }
   }, [
     loadDashboard,
+    location.pathname,
   ])
 
 
@@ -6057,7 +8501,11 @@ function AdminDashboard({
     === 'integrations'
   ) {
     content = (
-      <IntegrationsPage />
+      <IntegrationsPage
+        accessToken={
+          accessToken
+        }
+      />
     )
   }
 
@@ -6092,6 +8540,9 @@ function AdminDashboard({
       <SettingsPage
         profile={
           profile
+        }
+        accessToken={
+          accessToken
         }
       />
     )

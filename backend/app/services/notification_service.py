@@ -39,6 +39,7 @@ def _notification_user_id(
 def get_user_notifications(
     current_user: dict[str, Any],
     limit: int = 50,
+    offset: int = 0,
 ) -> dict[str, Any]:
     user_id = _notification_user_id(
         current_user
@@ -100,6 +101,7 @@ def get_user_notifications(
                     n.notification_id DESC
 
                 LIMIT :limit
+                OFFSET :offset
                 """
             ),
             {
@@ -108,6 +110,9 @@ def get_user_notifications(
 
                 "limit":
                     limit,
+
+                "offset":
+                    offset,
             },
         ).mappings().all()
 

@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useEffect,
   useMemo,
   useState,
@@ -12,6 +13,8 @@ import {
 
 import NotificationBell from '../../components/notifications/NotificationBell'
 
+import TicketResponseWorkspace from '../../components/staff/TicketResponseWorkspace'
+
 import {
   getNotifications,
   markAllNotificationsRead,
@@ -19,8 +22,19 @@ import {
 } from '../../services/notificationService'
 
 import {
+  getHodAuditLogs,
+} from '../../services/hodAuditService'
+
+import {
+  escalateHodToAdmin,
+  overrideHodDecision,
+} from '../../services/hodEscalationService'
+
+import {
   getHodDashboard,
+  getTicketResponse,
   performHodAction,
+  resolveTicket,
 } from '../../services/ticketService'
 
 import {
@@ -90,6 +104,32 @@ function normalizedStatus(status) {
 }
 
 
+function ticketRecencyValue(ticket) {
+  const value =
+    ticket?.submitted_at
+    || ticket?.created_at
+    || ticket?.updated_at
+
+  if (value) {
+    const time =
+      new Date(value).getTime()
+
+    if (!Number.isNaN(time)) {
+      return time
+    }
+  }
+
+  const match =
+    String(
+      ticketNumber(ticket),
+    ).match(/(\d+)$/)
+
+  return match
+    ? Number(match[1])
+    : 0
+}
+
+
 function isOpen(status) {
   return ![
     'RESOLVED',
@@ -102,31 +142,102 @@ function isOpen(status) {
 }
 
 
-function hasEscalation(ticket) {
-  return (
-    Boolean(
-      ticket?.has_active_escalation,
+function eligibleReassignmentOfficers(
+  workload,
+  ticket,
+) {
+  const ticketDeskId =
+    String(
+      ticket?.routed_desk_id
+      || '',
     )
-    || [
-      'ESCALATED',
-      'PENDING_APPROVAL',
-    ].includes(
-      normalizedStatus(
-        ticket?.status,
-      ),
+
+  const currentOfficerId =
+    String(
+      ticket?.assigned_officer_id
+      || '',
     )
+
+  const targetRole =
+    String(
+      ticket?.target_role
+      || '',
+    )
+
+  if (!ticketDeskId) {
+    return []
+  }
+
+  return workload.filter(
+    (officer) => {
+      const officerId =
+        String(
+          officer?.user_id
+          || officer?.id
+          || '',
+        )
+
+      const officerDeskId =
+        String(
+          officer?.desk_id
+          || '',
+        )
+
+      const officerRole =
+        String(
+          officer?.role
+          || '',
+        )
+
+      if (
+        !officerId
+        || officerId
+        === currentOfficerId
+      ) {
+        return false
+      }
+
+      if (
+        officer?.is_active === false
+        || officer?.is_available === false
+      ) {
+        return false
+      }
+
+      if (
+        officerDeskId
+        !== ticketDeskId
+      ) {
+        return false
+      }
+
+      if (
+        targetRole
+        && officerRole
+        && officerRole !== targetRole
+      ) {
+        return false
+      }
+
+      return true
+    },
   )
 }
 
 
 function actionReason(ticket) {
   if (
-    ticket?.has_active_escalation
-    || normalizedStatus(
+    normalizedStatus(
       ticket?.status,
     ) === 'ESCALATED'
   ) {
     return 'Escalated case'
+  }
+
+  if (
+    ticket?.has_active_escalation
+  ) {
+    return 'Escalation follow-up'
   }
 
   if (
@@ -682,10 +793,10 @@ function NavButton({
       {numberOf(
         badge,
       ) > 0 && (
-        <span className="rounded-full bg-white/15 px-2 py-0.5 text-[8px] font-bold">
-          {badge}
-        </span>
-      )}
+          <span className="rounded-full bg-white/15 px-2 py-0.5 text-[8px] font-bold">
+            {badge}
+          </span>
+        )}
 
     </button>
   )
@@ -726,7 +837,7 @@ function Metric({
           className={
             'flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-lg font-bold '
             + tones[
-              tone
+            tone
             ]
           }
         >
@@ -789,6 +900,250 @@ function PageHeading({
 }
 
 
+function PaginationBar({
+  itemLabel = 'items',
+  page,
+  pageSize,
+  totalItems,
+  totalPages,
+  visibleCount,
+  onPageChange,
+  onPageSizeChange,
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-3">
+
+      <p className="text-[8px] text-slate-500">
+        Showing {visibleCount} of {totalItems} {itemLabel}
+      </p>
+
+
+      <div className="flex flex-wrap items-center gap-2">
+
+        <label className="flex items-center gap-2 text-[8px] text-slate-500">
+          Per page
+
+          <select
+            value={pageSize}
+            onChange={(event) =>
+              onPageSizeChange(
+                Number(event.target.value),
+              )
+            }
+            className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-[8px] font-semibold text-slate-700"
+          >
+            <option value={10}>10</option>
+            <option value={20}>20</option>
+            <option value={50}>50</option>
+          </select>
+        </label>
+
+
+        <button
+          type="button"
+          onClick={() =>
+            onPageChange(
+              Math.max(
+                1,
+                page - 1,
+              ),
+            )
+          }
+          disabled={page <= 1}
+          className="rounded-lg border border-slate-200 px-3 py-2 text-[8px] font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Previous
+        </button>
+
+
+        <span className="min-w-[76px] text-center text-[8px] font-semibold text-slate-600">
+          Page {page} of {totalPages}
+        </span>
+
+
+        <button
+          type="button"
+          onClick={() =>
+            onPageChange(
+              Math.min(
+                totalPages,
+                page + 1,
+              ),
+            )
+          }
+          disabled={page >= totalPages}
+          className="rounded-lg border border-slate-200 px-3 py-2 text-[8px] font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Next
+        </button>
+
+      </div>
+
+    </div>
+  )
+}
+
+
+function QueryMetadataPanel({
+  ticket,
+  currentTime,
+  title = 'Query details',
+}) {
+  if (!ticket) {
+    return null
+  }
+
+  const status =
+    normalizedStatus(
+      ticket.status,
+    )
+
+  const fields = [
+    [
+      'Priority',
+      ticket.priority
+      || 'MEDIUM',
+    ],
+    [
+      'Owner',
+      cleanText(
+        ticket.assignee_name
+        || 'Unassigned',
+      ),
+    ],
+    [
+      'Desk',
+      cleanText(
+        ticket.desk_name
+        || 'Not assigned',
+      ),
+    ],
+    [
+      'Department',
+      cleanText(
+        ticket.department_name
+        || 'Not assigned',
+      ),
+    ],
+    [
+      'SLA',
+      slaInfo(
+        ticket.sla_due_at,
+        currentTime,
+      ).text,
+    ],
+    [
+      'Submitted',
+      formatDate(
+        ticket.submitted_at
+        || ticket.created_at,
+      ),
+    ],
+    [
+      'Updated',
+      formatDate(
+        ticket.updated_at,
+      ),
+    ],
+    [
+      'Resolved',
+      formatDate(
+        ticket.resolved_at,
+      ),
+    ],
+  ]
+
+  return (
+    <div className="rounded-2xl border border-blue-100 bg-white p-4 shadow-sm">
+
+      <div className="flex flex-wrap items-start justify-between gap-3">
+
+        <div className="min-w-0">
+
+          <p className="text-[8px] font-bold uppercase tracking-[0.1em] text-blue-600">
+            {title}
+          </p>
+
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+
+            <span className="font-mono text-[9px] font-bold text-blue-700">
+              {ticketNumber(ticket)}
+            </span>
+
+            <span className="text-slate-300">
+              ·
+            </span>
+
+            <h3 className="min-w-0 text-[12px] font-bold text-slate-900">
+              {
+                cleanText(
+                  ticket.subject
+                  || 'No subject',
+                )
+              }
+            </h3>
+
+          </div>
+
+
+          <p className="mt-1 text-[8px] text-slate-500">
+            {actionReason(ticket)}
+          </p>
+
+        </div>
+
+
+        <span
+          className={
+            'rounded-full border px-2.5 py-1 text-[7px] font-bold '
+            + statusTone(
+              status,
+            )
+          }
+        >
+          {
+            status
+              .replace(
+                /_/g,
+                ' ',
+              )
+          }
+        </span>
+
+      </div>
+
+
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+
+        {fields.map(
+          ([
+            label,
+            value,
+          ]) => (
+            <div
+              key={label}
+              className="rounded-xl border border-slate-100 bg-slate-50 p-3"
+            >
+
+              <p className="text-[7px] font-bold uppercase tracking-[0.08em] text-slate-400">
+                {label}
+              </p>
+
+              <p className="mt-1 break-words text-[9px] font-semibold text-slate-700">
+                {value}
+              </p>
+
+            </div>
+          ),
+        )}
+
+      </div>
+
+    </div>
+  )
+}
+
+
 function WorkloadCard({
   workload,
 }) {
@@ -845,13 +1200,13 @@ function WorkloadCard({
               active === 0
                 ? 0
                 : Math.max(
-                    5,
-                    (
-                      active
-                      / maximum
-                    )
-                    * 100,
+                  5,
+                  (
+                    active
+                    / maximum
                   )
+                  * 100,
+                )
 
 
             return (
@@ -921,9 +1276,24 @@ function HodNotificationsPage({
   ] = useState([])
 
   const [
+    totalCount,
+    setTotalCount,
+  ] = useState(0)
+
+  const [
     unreadCount,
     setUnreadCount,
   ] = useState(0)
+
+  const [
+    page,
+    setPage,
+  ] = useState(1)
+
+  const [
+    pageSize,
+    setPageSize,
+  ] = useState(10)
 
   const [
     loading,
@@ -944,6 +1314,32 @@ function HodNotificationsPage({
     refreshVersion,
     setRefreshVersion,
   ] = useState(0)
+
+
+  const totalPages =
+    Math.max(
+      1,
+      Math.ceil(
+        totalCount
+        / pageSize,
+      ),
+    )
+
+
+  const pageStart =
+    totalCount === 0
+      ? 0
+      : (
+        (page - 1)
+        * pageSize
+      ) + 1
+
+
+  const pageEnd =
+    Math.min(
+      page * pageSize,
+      totalCount,
+    )
 
 
   useEffect(() => {
@@ -974,7 +1370,10 @@ function HodNotificationsPage({
             await getNotifications(
               accessToken,
               {
-                limit: 50,
+                limit:
+                  pageSize,
+
+                page,
 
                 signal:
                   controller.signal,
@@ -988,12 +1387,44 @@ function HodNotificationsPage({
             return
           }
 
+
+          const nextTotal =
+            numberOf(
+              data?.total,
+            )
+
+          const nextTotalPages =
+            Math.max(
+              1,
+              Math.ceil(
+                nextTotal
+                / pageSize,
+              ),
+            )
+
+
+          if (
+            page
+            > nextTotalPages
+          ) {
+            setPage(
+              nextTotalPages,
+            )
+
+            return
+          }
+
+
           setNotifications(
             Array.isArray(
               data?.items,
             )
               ? data.items
               : [],
+          )
+
+          setTotalCount(
+            nextTotal,
           )
 
           setUnreadCount(
@@ -1008,7 +1439,7 @@ function HodNotificationsPage({
             active
             && !controller.signal.aborted
             && error?.name
-              !== 'AbortError'
+            !== 'AbortError'
           ) {
             setErrorMessage(
               error.message
@@ -1069,6 +1500,8 @@ function HodNotificationsPage({
   }, [
     accessToken,
     refreshVersion,
+    page,
+    pageSize,
   ])
 
 
@@ -1114,7 +1547,7 @@ function HodNotificationsPage({
             current.map(
               (item) =>
                 item.notification_id
-                === updated.notification_id
+                  === updated.notification_id
                   ? updated
                   : item,
             ),
@@ -1170,14 +1603,14 @@ function HodNotificationsPage({
                 item.is_read
                   ? item
                   : {
-                      ...item,
+                    ...item,
 
-                      is_read:
-                        true,
+                    is_read:
+                      true,
 
-                      read_at:
-                        readAt,
-                    },
+                    read_at:
+                      readAt,
+                  },
             ),
         )
 
@@ -1236,7 +1669,7 @@ function HodNotificationsPage({
             >
               {
                 actionLoading
-                === 'ALL'
+                  === 'ALL'
                   ? 'Updating...'
                   : 'Mark all read'
               }
@@ -1254,9 +1687,9 @@ function HodNotificationsPage({
           value={
             loading
               ? '—'
-              : notifications.length
+              : totalCount
           }
-          subtitle="Recent notifications"
+          subtitle="All notifications"
           tone="blue"
           symbol="N"
         />
@@ -1279,10 +1712,10 @@ function HodNotificationsPage({
             loading
               ? '—'
               : Math.max(
-                  0,
-                  notifications.length
-                  - unreadCount,
-                )
+                0,
+                totalCount
+                - unreadCount,
+              )
           }
           subtitle="Already reviewed"
           tone="green"
@@ -1347,7 +1780,7 @@ function HodNotificationsPage({
                   notification.notification_id
                 }
                 className={
-                  'border-b border-slate-100 px-5 py-4 last:border-b-0 '
+                  'border-b border-slate-100 px-5 py-4 '
                   + (
                     notification.is_read
                       ? 'bg-white'
@@ -1431,7 +1864,7 @@ function HodNotificationsPage({
                     >
                       {
                         actionLoading
-                        === notification.notification_id
+                          === notification.notification_id
                           ? 'Updating...'
                           : 'Mark read'
                       }
@@ -1442,6 +1875,118 @@ function HodNotificationsPage({
 
               </article>
             ),
+          )
+        }
+
+
+        {
+          !loading
+          && totalCount > 0
+          && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-4">
+
+              <p className="text-[9px] text-slate-500">
+                Showing{' '}
+                <span className="font-semibold text-slate-700">
+                  {pageStart}-{pageEnd}
+                </span>
+                {' '}of{' '}
+                <span className="font-semibold text-slate-700">
+                  {totalCount}
+                </span>
+                {' '}notifications
+              </p>
+
+
+              <div className="flex flex-wrap items-center gap-2">
+
+                <label className="flex items-center gap-2 text-[9px] text-slate-500">
+                  Rows
+
+                  <select
+                    value={
+                      pageSize
+                    }
+                    onChange={
+                      (event) => {
+                        setPageSize(
+                          Number(
+                            event.target.value,
+                          ),
+                        )
+
+                        setPage(1)
+                        setLoading(true)
+                      }
+                    }
+                    className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-[9px] font-semibold text-slate-700 outline-none"
+                  >
+                    <option value={10}>
+                      10
+                    </option>
+
+                    <option value={20}>
+                      20
+                    </option>
+
+                    <option value={50}>
+                      50
+                    </option>
+                  </select>
+                </label>
+
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoading(true)
+
+                    setPage(
+                      (current) =>
+                        Math.max(
+                          1,
+                          current - 1,
+                        ),
+                    )
+                  }}
+                  disabled={
+                    page <= 1
+                  }
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[9px] font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Previous
+                </button>
+
+
+                <span className="min-w-[72px] text-center text-[9px] font-semibold text-slate-600">
+                  Page {page} of {totalPages}
+                </span>
+
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoading(true)
+
+                    setPage(
+                      (current) =>
+                        Math.min(
+                          totalPages,
+                          current + 1,
+                        ),
+                    )
+                  }}
+                  disabled={
+                    page >= totalPages
+                  }
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[9px] font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Next
+                </button>
+
+              </div>
+
+            </div>
           )
         }
 
@@ -1475,8 +2020,8 @@ function HodDailySummaryPage({
 
       <PageHeading
         eyebrow="HOD Portal / Daily Gmail Summary"
-        title="Daily Gmail summary"
-        subtitle="Current department summary generated from live HOD dashboard data."
+        title="Daily Gmail summary preview"
+        subtitle="Live department snapshot formatted for the planned daily HOD email summary."
       />
 
 
@@ -1515,8 +2060,8 @@ function HodDailySummaryPage({
                 currentTime === null
                   ? 'Preparing...'
                   : formatDate(
-                      currentTime,
-                    )
+                    currentTime,
+                  )
               }
             </p>
 
@@ -1749,12 +2294,12 @@ function HodDailySummaryPage({
           <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
 
             <p className="text-[9px] font-bold text-amber-800">
-              Gmail summary status
+              Gmail summary delivery status
             </p>
 
             <p className="mt-1 text-[8px] leading-4 text-amber-700">
-              This page shows the real department summary. No unsupported manual
-              “send summary now” action is simulated.
+              This page is a live preview. Scheduled Gmail delivery is handled by the
+              configured HOD daily-summary workflow.
             </p>
 
           </div>
@@ -1769,45 +2314,310 @@ function HodDailySummaryPage({
 
 
 function HodAuditHistoryPage({
-  allTickets,
+  accessToken,
 }) {
-  const activity =
-    useMemo(
-      () =>
-        [...allTickets]
-          .sort(
-            (
-              first,
-              second,
-            ) => {
-              const firstTime =
-                new Date(
-                  first.updated_at
-                  || first.created_at
-                  || 0,
-                ).getTime()
+  const [
+    auditData,
+    setAuditData,
+  ] = useState({
+    items: [],
+    total: 0,
+    page: 1,
+    page_size: 10,
+    total_pages: 0,
+  })
 
-              const secondTime =
-                new Date(
-                  second.updated_at
-                  || second.created_at
-                  || 0,
-                ).getTime()
+  const [
+    loading,
+    setLoading,
+  ] = useState(true)
 
-              return (
-                secondTime
-                - firstTime
-              )
-            },
+  const [
+    errorMessage,
+    setErrorMessage,
+  ] = useState('')
+
+  const [
+    searchInput,
+    setSearchInput,
+  ] = useState('')
+
+  const [
+    searchTerm,
+    setSearchTerm,
+  ] = useState('')
+
+  const [
+    entityType,
+    setEntityType,
+  ] = useState('')
+
+  const [
+    outcome,
+    setOutcome,
+  ] = useState('')
+
+  const [
+    action,
+    setAction,
+  ] = useState('')
+
+  const [
+    page,
+    setPage,
+  ] = useState(1)
+
+  const [
+    pageSize,
+    setPageSize,
+  ] = useState(10)
+
+  const [
+    expandedAuditId,
+    setExpandedAuditId,
+  ] = useState('')
+
+
+  useEffect(() => {
+    const timer =
+      window.setTimeout(
+        () => {
+          setSearchTerm(
+            searchInput.trim(),
           )
-          .slice(
-            0,
-            30,
-          ),
-      [
-        allTickets,
-      ],
+
+          setPage(1)
+        },
+        350,
+      )
+
+    return () => {
+      window.clearTimeout(
+        timer,
+      )
+    }
+  }, [
+    searchInput,
+  ])
+
+
+  useEffect(() => {
+    if (!accessToken) {
+      return undefined
+    }
+
+    let active =
+      true
+
+    const controller =
+      new AbortController()
+
+    const loadAudit =
+      async () => {
+        setLoading(true)
+        setErrorMessage('')
+
+        try {
+          const data =
+            await getHodAuditLogs(
+              accessToken,
+              {
+                search:
+                  searchTerm,
+
+                action:
+                  action,
+
+                entityType:
+                  entityType,
+
+                outcome:
+                  outcome,
+
+                page:
+                  page,
+
+                pageSize:
+                  pageSize,
+
+                signal:
+                  controller.signal,
+              },
+            )
+
+          if (
+            active
+            && !controller
+              .signal
+              .aborted
+          ) {
+            setAuditData(
+              data,
+            )
+          }
+        } catch (error) {
+          if (
+            active
+            && !controller
+              .signal
+              .aborted
+            && error?.name
+            !== 'AbortError'
+          ) {
+            setErrorMessage(
+              error?.message
+              || 'Audit history could not be loaded.',
+            )
+          }
+        } finally {
+          if (
+            active
+            && !controller
+              .signal
+              .aborted
+          ) {
+            setLoading(false)
+          }
+        }
+      }
+
+    loadAudit()
+
+    return () => {
+      active =
+        false
+
+      controller.abort()
+    }
+  }, [
+    accessToken,
+    searchTerm,
+    action,
+    entityType,
+    outcome,
+    page,
+    pageSize,
+  ])
+
+
+
+  const resetFilters =
+    () => {
+      setSearchInput('')
+      setSearchTerm('')
+      setAction('')
+      setEntityType('')
+      setOutcome('')
+      setPage(1)
+    }
+
+
+  const startItem =
+    auditData.total === 0
+      ? 0
+      : (
+        (
+          auditData.page - 1
+        )
+        * auditData.page_size
+        + 1
+      )
+
+  const endItem =
+    Math.min(
+      auditData.page
+      * auditData.page_size,
+      auditData.total,
     )
+
+
+  const actorLabel =
+    (item) => (
+      cleanText(
+        item.actor_name
+        || item.actor_service
+        || 'System',
+      )
+    )
+
+
+  const formatAction =
+    (value) =>
+      String(
+        value || 'UNKNOWN',
+      )
+        .replace(
+          /_/g,
+          ' ',
+        )
+
+
+  const valuePreview =
+    (value) => {
+      if (
+        value === null
+        || value === undefined
+      ) {
+        return '—'
+      }
+
+      if (
+        typeof value
+        === 'object'
+      ) {
+        try {
+          return JSON.stringify(
+            value,
+            null,
+            2,
+          )
+        } catch {
+          return String(
+            value,
+          )
+        }
+      }
+
+      return String(
+        value,
+      )
+    }
+
+
+  const outcomeTone =
+    (value) => {
+      const normalized =
+        String(
+          value || '',
+        ).toUpperCase()
+
+      if (
+        normalized === 'SUCCESS'
+      ) {
+        return (
+          'border-emerald-200 '
+          + 'bg-emerald-50 '
+          + 'text-emerald-700'
+        )
+      }
+
+      if (
+        normalized === 'FAILED'
+        || normalized === 'FAILURE'
+      ) {
+        return (
+          'border-rose-200 '
+          + 'bg-rose-50 '
+          + 'text-rose-700'
+        )
+      }
+
+      return (
+        'border-slate-200 '
+        + 'bg-slate-50 '
+        + 'text-slate-600'
+      )
+    }
 
 
   return (
@@ -1816,19 +2626,18 @@ function HodAuditHistoryPage({
       <PageHeading
         eyebrow="HOD Portal / Audit History"
         title="Audit history"
-        subtitle="Department workflow activity visible to the authenticated HOD."
+        subtitle="Department-scoped workflow events recorded by the SmartQuery audit system."
       />
 
 
-      <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4">
+      <div className="mt-5 rounded-xl border border-blue-200 bg-blue-50 p-4">
 
-        <p className="text-[9px] font-bold text-amber-800">
-          Department activity snapshot
+        <p className="text-[9px] font-bold text-blue-800">
+          Verified department audit trail
         </p>
 
-        <p className="mt-1 text-[8px] leading-4 text-amber-700">
-          This view uses real HOD-visible query records. It does not claim to
-          be the separate system-wide administrative audit-log endpoint.
+        <p className="mt-1 text-[8px] leading-4 text-blue-700">
+          Events shown here are read from the real audit log and are restricted to resources belonging to your authorized department.
         </p>
 
       </div>
@@ -1838,47 +2647,193 @@ function HodAuditHistoryPage({
 
         <div className="border-b border-slate-100 px-5 py-4">
 
-          <h2 className="text-[16px] font-bold">
-            Recent department activity
-          </h2>
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
 
-          <p className="mt-1 text-[9px] text-slate-500">
-            Current status and ownership history snapshot
-          </p>
+            <div>
+
+              <h2 className="text-[16px] font-bold">
+                Department audit events
+              </h2>
+
+              <p className="mt-1 text-[9px] text-slate-500">
+                Actor, action, affected resource, outcome and recorded changes
+              </p>
+
+            </div>
+
+
+            <div className="rounded-full bg-slate-100 px-3 py-1 text-[8px] font-bold text-slate-600">
+              {auditData.total} EVENTS
+            </div>
+
+          </div>
 
         </div>
 
 
+        <div className="grid gap-3 border-b border-slate-100 p-4 lg:grid-cols-[minmax(220px,1fr)_190px_150px_150px_auto]">
+
+          <div className="relative">
+
+            <input
+              type="search"
+              value={
+                searchInput
+              }
+              onChange={
+                (event) =>
+                  setSearchInput(
+                    event.target.value,
+                  )
+              }
+              placeholder="Search action, actor, ticket or entity..."
+              className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-[9px] outline-none transition focus:border-blue-400 focus:bg-white"
+            />
+
+          </div>
+
+
+          <input
+            value={
+              action
+            }
+            onChange={
+              (event) => {
+                setAction(
+                  event.target.value
+                    .toUpperCase(),
+                )
+
+                setPage(1)
+              }
+            }
+            placeholder="Exact action"
+            className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-[9px] outline-none focus:border-blue-400"
+          />
+
+
+          <select
+            value={
+              entityType
+            }
+            onChange={
+              (event) => {
+                setEntityType(
+                  event.target.value,
+                )
+
+                setPage(1)
+              }
+            }
+            className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-[9px] outline-none focus:border-blue-400"
+          >
+            <option value="">
+              All entities
+            </option>
+
+            <option value="TICKET">
+              Tickets
+            </option>
+
+            <option value="RESPONSE">
+              Responses
+            </option>
+
+            <option value="USER">
+              Users
+            </option>
+
+            <option value="APPROVED_USER">
+              Approved users
+            </option>
+
+            <option value="DEPARTMENT">
+              Department
+            </option>
+
+          </select>
+
+
+          <select
+            value={
+              outcome
+            }
+            onChange={
+              (event) => {
+                setOutcome(
+                  event.target.value,
+                )
+
+                setPage(1)
+              }
+            }
+            className="h-11 rounded-xl border border-slate-200 bg-white px-3 text-[9px] outline-none focus:border-blue-400"
+          >
+            <option value="">
+              All outcomes
+            </option>
+
+            <option value="SUCCESS">
+              Success
+            </option>
+
+            <option value="FAILED">
+              Failed
+            </option>
+
+          </select>
+
+
+          <button
+            type="button"
+            onClick={
+              resetFilters
+            }
+            className="h-11 rounded-xl border border-slate-200 bg-white px-4 text-[9px] font-semibold text-slate-600 hover:bg-slate-50"
+          >
+            Reset
+          </button>
+
+        </div>
+
+
+        {errorMessage && (
+          <div className="border-b border-rose-100 bg-rose-50 px-5 py-3 text-[9px] text-rose-700">
+            {errorMessage}
+          </div>
+        )}
+
+
         <div className="overflow-x-auto">
 
-          <table className="w-full min-w-[780px]">
+          <table className="w-full min-w-[980px]">
 
             <thead>
 
               <tr className="bg-slate-50 text-left text-[8px] font-bold uppercase text-slate-400">
 
                 <th className="px-4 py-3">
-                  Query
+                  Time
                 </th>
 
                 <th className="px-4 py-3">
-                  Subject
+                  Action
                 </th>
 
                 <th className="px-4 py-3">
-                  Owner
+                  Actor
                 </th>
 
                 <th className="px-4 py-3">
-                  Priority
+                  Ticket / Entity
                 </th>
 
                 <th className="px-4 py-3">
-                  Current Status
+                  Outcome
                 </th>
 
-                <th className="px-4 py-3">
-                  Last Updated
+                <th className="px-4 py-3 text-right">
+                  Changes
                 </th>
 
               </tr>
@@ -1888,113 +2843,373 @@ function HodAuditHistoryPage({
 
             <tbody>
 
-              {activity.map(
-                (ticket) => (
-                  <tr
-                    key={
-                      ticket.ticket_id
-                      || ticketNumber(
-                        ticket,
-                      )
-                    }
-                    className="border-b border-slate-100 text-[9px]"
-                  >
-
-                    <td className="px-4 py-4 font-mono font-bold">
-                      {
-                        ticketNumber(
-                          ticket,
-                        )
-                      }
-                    </td>
-
-
-                    <td className="px-4 py-4">
-
-                      <p className="max-w-[250px] truncate font-semibold text-slate-700">
-                        {
-                          cleanText(
-                            ticket.subject
-                            || 'No subject',
-                          )
-                        }
-                      </p>
-
-                    </td>
-
-
-                    <td className="px-4 py-4 text-slate-600">
-                      {
-                        cleanText(
-                          ticket.assignee_name
-                          || 'Unassigned',
-                        )
-                      }
-                    </td>
-
-
-                    <td className="px-4 py-4">
-                      {
-                        ticket.priority
-                        || 'MEDIUM'
-                      }
-                    </td>
-
-
-                    <td className="px-4 py-4">
-
-                      <span
-                        className={
-                          'rounded-full border px-2 py-1 text-[7px] font-bold '
-                          + statusTone(
-                            ticket.status,
-                          )
-                        }
-                      >
-                        {
-                          normalizedStatus(
-                            ticket.status,
-                          )
-                            .replace(
-                              /_/g,
-                              ' ',
-                            )
-                        }
-                      </span>
-
-                    </td>
-
-
-                    <td className="px-4 py-4 text-slate-500">
-                      {
-                        formatDate(
-                          ticket.updated_at
-                          || ticket.created_at,
-                        )
-                      }
-                    </td>
-
-                  </tr>
-                ),
-              )}
-
-
-              {activity.length === 0 && (
+              {loading && (
                 <tr>
 
                   <td
                     colSpan="6"
                     className="px-5 py-14 text-center text-[10px] text-slate-500"
                   >
-                    No department activity available.
+                    Loading audit history...
                   </td>
 
                 </tr>
               )}
 
+
+              {!loading
+                && auditData.items.map(
+                  (item) => {
+                    const expanded =
+                      expandedAuditId
+                      === item.audit_id
+
+                    return (
+                      <Fragment
+                        key={
+                          item.audit_id
+                        }
+                      >
+                        <tr
+                          className="border-b border-slate-100 text-[9px]"
+                        >
+
+                          <td className="whitespace-nowrap px-4 py-4 text-slate-500">
+                            {
+                              formatDate(
+                                item.created_at,
+                              )
+                            }
+                          </td>
+
+
+                          <td className="px-4 py-4">
+
+                            <p className="font-semibold text-slate-800">
+                              {
+                                formatAction(
+                                  item.action,
+                                )
+                              }
+                            </p>
+
+                            <p className="mt-1 text-[7px] uppercase text-slate-400">
+                              Event #
+                              {
+                                item.event_sequence
+                              }
+                            </p>
+
+                          </td>
+
+
+                          <td className="px-4 py-4">
+
+                            <p className="font-semibold text-slate-700">
+                              {
+                                actorLabel(
+                                  item,
+                                )
+                              }
+                            </p>
+
+                            <p className="mt-1 text-[7px] uppercase text-slate-400">
+                              {
+                                item.actor_role
+                                || (
+                                  item.actor_service
+                                    ? 'SERVICE'
+                                    : 'SYSTEM'
+                                )
+                              }
+                            </p>
+
+                          </td>
+
+
+                          <td className="px-4 py-4">
+
+                            {item.ticket_number ? (
+                              <>
+                                <p className="font-mono font-bold text-blue-700">
+                                  {
+                                    item.ticket_number
+                                  }
+                                </p>
+
+                                <p className="mt-1 text-[7px] uppercase text-slate-400">
+                                  {
+                                    item.entity_type
+                                  }
+                                </p>
+                              </>
+                            ) : (
+                              <>
+                                <p className="font-semibold text-slate-700">
+                                  {
+                                    item.entity_type
+                                  }
+                                </p>
+
+                                <p className="mt-1 max-w-[170px] truncate font-mono text-[7px] text-slate-400">
+                                  {
+                                    item.entity_id
+                                    || '—'
+                                  }
+                                </p>
+                              </>
+                            )}
+
+                          </td>
+
+
+                          <td className="px-4 py-4">
+
+                            <span
+                              className={
+                                'rounded-full border px-2 py-1 text-[7px] font-bold '
+                                + outcomeTone(
+                                  item.outcome,
+                                )
+                              }
+                            >
+                              {
+                                item.outcome
+                              }
+                            </span>
+
+                          </td>
+
+
+                          <td className="px-4 py-4 text-right">
+
+                            <button
+                              type="button"
+                              onClick={
+                                () =>
+                                  setExpandedAuditId(
+                                    expanded
+                                      ? ''
+                                      : item.audit_id,
+                                  )
+                              }
+                              className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[8px] font-semibold text-blue-700 hover:bg-blue-100"
+                            >
+                              {
+                                expanded
+                                  ? 'Hide ↑'
+                                  : 'View ↓'
+                              }
+                            </button>
+
+                          </td>
+
+                        </tr>
+
+
+                        {expanded && (
+                          <tr
+                            key={
+                              `${item.audit_id}-details`
+                            }
+                            className="border-b border-slate-100 bg-slate-50/60"
+                          >
+
+                            <td
+                              colSpan="6"
+                              className="px-5 py-5"
+                            >
+
+                              <div className="grid gap-4 lg:grid-cols-3">
+
+                                <div>
+
+                                  <p className="text-[8px] font-bold uppercase tracking-wide text-slate-400">
+                                    Previous values
+                                  </p>
+
+                                  <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-slate-200 bg-white p-3 text-[8px] leading-4 text-slate-600">
+                                    {
+                                      valuePreview(
+                                        item.old_values,
+                                      )
+                                    }
+                                  </pre>
+
+                                </div>
+
+
+                                <div>
+
+                                  <p className="text-[8px] font-bold uppercase tracking-wide text-slate-400">
+                                    New values
+                                  </p>
+
+                                  <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-slate-200 bg-white p-3 text-[8px] leading-4 text-slate-600">
+                                    {
+                                      valuePreview(
+                                        item.new_values,
+                                      )
+                                    }
+                                  </pre>
+
+                                </div>
+
+
+                                <div>
+
+                                  <p className="text-[8px] font-bold uppercase tracking-wide text-slate-400">
+                                    Event details
+                                  </p>
+
+                                  <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-xl border border-slate-200 bg-white p-3 text-[8px] leading-4 text-slate-600">
+                                    {
+                                      valuePreview(
+                                        item.details,
+                                      )
+                                    }
+                                  </pre>
+
+                                </div>
+
+                              </div>
+
+                            </td>
+
+                          </tr>
+                        )}
+                      </Fragment>
+                    )
+                  },
+                )}
+
+
+              {!loading
+                && auditData.items.length
+                === 0 && (
+                  <tr>
+
+                    <td
+                      colSpan="6"
+                      className="px-5 py-14 text-center text-[10px] text-slate-500"
+                    >
+                      No audit events match this view.
+                    </td>
+
+                  </tr>
+                )}
+
             </tbody>
 
           </table>
+
+        </div>
+
+
+        <div className="flex flex-col gap-3 border-t border-slate-100 px-5 py-4 text-[8px] text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+
+          <p>
+            Showing {startItem}-{endItem} of {auditData.total} audit events
+          </p>
+
+
+          <div className="flex flex-wrap items-center gap-3">
+
+            <label className="flex items-center gap-2">
+
+              <span>
+                Rows
+              </span>
+
+              <select
+                value={
+                  pageSize
+                }
+                onChange={
+                  (event) => {
+                    setPageSize(
+                      Number(
+                        event.target.value,
+                      ),
+                    )
+
+                    setPage(1)
+                  }
+                }
+                className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-[8px] text-slate-700 outline-none"
+              >
+                <option value="10">
+                  10
+                </option>
+
+                <option value="20">
+                  20
+                </option>
+
+                <option value="50">
+                  50
+                </option>
+              </select>
+
+            </label>
+
+
+            <button
+              type="button"
+              disabled={
+                loading
+                || page <= 1
+              }
+              onClick={
+                () =>
+                  setPage(
+                    (current) =>
+                      Math.max(
+                        1,
+                        current - 1,
+                      ),
+                  )
+              }
+              className="rounded-lg border border-slate-200 px-3 py-2 font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Previous
+            </button>
+
+
+            <span className="font-semibold text-slate-700">
+              Page {
+                auditData.total_pages
+                  === 0
+                  ? 0
+                  : auditData.page
+              } of {
+                auditData.total_pages
+              }
+            </span>
+
+
+            <button
+              type="button"
+              disabled={
+                loading
+                || auditData.total_pages
+                === 0
+                || page
+                >= auditData.total_pages
+              }
+              onClick={
+                () =>
+                  setPage(
+                    (current) =>
+                      current + 1,
+                  )
+              }
+              className="rounded-lg border border-slate-200 px-3 py-2 font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Next
+            </button>
+
+          </div>
 
         </div>
 
@@ -2033,14 +3248,19 @@ function HodDashboard({
   ] = useState('')
 
   const [
-    successMessage,
-    setSuccessMessage,
-  ] = useState('')
-
-  const [
     actionLoading,
     setActionLoading,
   ] = useState('')
+
+  const [
+    escalationActionFeedback,
+    setEscalationActionFeedback,
+  ] = useState({
+    ticketNumber: '',
+    action: '',
+    type: '',
+    message: '',
+  })
 
   const [
     searchTerm,
@@ -2053,8 +3273,18 @@ function HodDashboard({
   ] = useState('ALL')
 
   const [
-    selectedTicketNumber,
-    setSelectedTicketNumber,
+    centerReviewTicketNumber,
+    setCenterReviewTicketNumber,
+  ] = useState('')
+
+  const [
+    departmentReviewTicketNumber,
+    setDepartmentReviewTicketNumber,
+  ] = useState('')
+
+  const [
+    routingReviewTicketNumber,
+    setRoutingReviewTicketNumber,
   ] = useState('')
 
   const [
@@ -2063,9 +3293,79 @@ function HodDashboard({
   ] = useState('')
 
   const [
+    overrideReason,
+    setOverrideReason,
+  ] = useState('')
+
+  const [
+    adminEscalationReason,
+    setAdminEscalationReason,
+  ] = useState('')
+
+  const [
+    responseTicketNumber,
+    setResponseTicketNumber,
+  ] = useState('')
+
+  const [
+    responseDeliveryStatus,
+    setResponseDeliveryStatus,
+  ] = useState('')
+
+  const [
+    responseStatusLoading,
+    setResponseStatusLoading,
+  ] = useState(false)
+
+  const [
     currentTime,
     setCurrentTime,
   ] = useState(null)
+
+  const [
+    centerPage,
+    setCenterPage,
+  ] = useState(1)
+
+  const [
+    centerPageSize,
+    setCenterPageSize,
+  ] = useState(10)
+
+  const [
+    departmentSearch,
+    setDepartmentSearch,
+  ] = useState('')
+
+  const [
+    departmentStatus,
+    setDepartmentStatus,
+  ] = useState('ALL')
+
+  const [
+    departmentPage,
+    setDepartmentPage,
+  ] = useState(1)
+
+  const [
+    departmentPageSize,
+    setDepartmentPageSize,
+  ] = useState(10)
+
+  const [
+    routingSearch,
+    setRoutingSearch,
+  ] = useState('')
+
+  const [
+    routingPage,
+    setRoutingPage,
+  ] = useState(1)
+
+  const [
+    routingPageSize,
+    setRoutingPageSize,
+  ] = useState(10)
 
 
   const loadDashboard =
@@ -2136,7 +3436,7 @@ function HodDashboard({
                   active
                   && !controller.signal.aborted
                   && error?.name
-                    !== 'AbortError'
+                  !== 'AbortError'
                 ) {
                   setErrorMessage(
                     error.message
@@ -2210,6 +3510,89 @@ function HodDashboard({
   }, [])
 
 
+  useEffect(() => {
+    if (
+      !accessToken
+      || !responseTicketNumber
+    ) {
+      return undefined
+    }
+
+    let active = true
+    let requestRunning = false
+
+    const refreshResponseStatus =
+      async () => {
+        if (requestRunning) {
+          return
+        }
+
+        requestRunning = true
+
+        if (active) {
+          setResponseStatusLoading(true)
+        }
+
+        try {
+          const data =
+            await getTicketResponse(
+              accessToken,
+              responseTicketNumber,
+            )
+
+          if (active) {
+            setResponseDeliveryStatus(
+              String(
+                data?.delivery_status
+                || '',
+              ).toUpperCase(),
+            )
+          }
+        } catch {
+          // The response workspace displays detailed
+          // response errors. A later poll may succeed.
+        } finally {
+          requestRunning = false
+
+          if (active) {
+            setResponseStatusLoading(false)
+          }
+        }
+      }
+
+    const initialTimer =
+      window.setTimeout(
+        () => {
+          void refreshResponseStatus()
+        },
+        0,
+      )
+
+    const interval =
+      window.setInterval(
+        () => {
+          void refreshResponseStatus()
+        },
+        5000,
+      )
+
+    return () => {
+      active = false
+
+      window.clearTimeout(
+        initialTimer,
+      )
+
+      window.clearInterval(
+        interval,
+      )
+    }
+  }, [
+    accessToken,
+    responseTicketNumber,
+  ])
+
+
   const allTickets =
     useMemo(
       () =>
@@ -2273,7 +3656,10 @@ function HodDashboard({
     useMemo(
       () =>
         allTickets.filter(
-          hasEscalation,
+          (ticket) =>
+            Boolean(
+              ticket.has_active_hod_escalation,
+            ),
         ),
       [
         allTickets,
@@ -2303,37 +3689,38 @@ function HodDashboard({
           return []
         }
 
-        return openTickets.filter(
-          (ticket) => {
-            if (
-              !ticket.sla_due_at
-            ) {
-              return false
-            }
+        return openTickets
+          .filter(
+            (ticket) => {
+              if (
+                !ticket.sla_due_at
+              ) {
+                return false
+              }
 
-            const due =
-              new Date(
-                ticket.sla_due_at,
-              ).getTime()
+              const due =
+                new Date(
+                  ticket.sla_due_at,
+                ).getTime()
 
-            if (
-              Number.isNaN(
-                due,
+              if (
+                Number.isNaN(
+                  due,
+                )
+              ) {
+                return false
+              }
+
+              const difference =
+                due
+                - currentTime
+
+              return (
+                difference >= 0
+                && difference <= 86400000
               )
-            ) {
-              return false
-            }
-
-            const difference =
-              due
-              - currentTime
-
-            return (
-              difference >= 0
-              && difference <= 86400000
-            )
-          },
-        )
+            },
+          )
       },
       [
         currentTime,
@@ -2407,84 +3794,90 @@ function HodDashboard({
             .toLowerCase()
 
 
-        return actionQueue.filter(
-          (ticket) => {
-            const text =
-              [
-                ticketNumber(
-                  ticket,
-                ),
-                ticket.subject,
-                ticket.desk_name,
-                ticket.assignee_name,
-                actionReason(
-                  ticket,
-                ),
-              ]
-                .filter(Boolean)
-                .join(' ')
-                .toLowerCase()
+        return actionQueue
+          .filter(
+            (ticket) => {
+              const text =
+                [
+                  ticketNumber(
+                    ticket,
+                  ),
+                  ticket.subject,
+                  ticket.desk_name,
+                  ticket.assignee_name,
+                  actionReason(
+                    ticket,
+                  ),
+                ]
+                  .filter(Boolean)
+                  .join(' ')
+                  .toLowerCase()
 
 
-            const matchesSearch =
-              !search
-              || text.includes(
-                search,
+              const matchesSearch =
+                !search
+                || text.includes(
+                  search,
+                )
+
+
+              let matchesFilter =
+                true
+
+
+              if (
+                queueFilter
+                === 'ESCALATED'
+              ) {
+                matchesFilter =
+                  Boolean(
+                    ticket.has_active_hod_escalation,
+                  )
+              }
+
+
+              if (
+                queueFilter
+                === 'OVERDUE'
+              ) {
+                matchesFilter =
+                  Boolean(
+                    ticket.is_overdue,
+                  )
+              }
+
+
+              if (
+                queueFilter
+                === 'UNASSIGNED'
+              ) {
+                matchesFilter =
+                  !ticket.assigned_officer_id
+              }
+
+
+              if (
+                queueFilter
+                === 'MANUAL'
+              ) {
+                matchesFilter =
+                  Boolean(
+                    ticket.requires_manual_review,
+                  )
+              }
+
+
+              return (
+                matchesSearch
+                && matchesFilter
               )
-
-
-            let matchesFilter =
-              true
-
-
-            if (
-              queueFilter
-              === 'ESCALATED'
-            ) {
-              matchesFilter =
-                hasEscalation(
-                  ticket,
-                )
-            }
-
-
-            if (
-              queueFilter
-              === 'OVERDUE'
-            ) {
-              matchesFilter =
-                Boolean(
-                  ticket.is_overdue,
-                )
-            }
-
-
-            if (
-              queueFilter
-              === 'UNASSIGNED'
-            ) {
-              matchesFilter =
-                !ticket.assigned_officer_id
-            }
-
-
-            if (
-              queueFilter
-              === 'MANUAL'
-            ) {
-              matchesFilter =
-                Boolean(
-                  ticket.requires_manual_review,
-                )
-            }
-
-
-            return (
-              matchesSearch
-              && matchesFilter
-            )
-          },
-        )
+            },
+          )
+          .sort(
+            (first, second) =>
+              ticketRecencyValue(second)
+              - ticketRecencyValue(first),
+          )
       },
       [
         actionQueue,
@@ -2494,15 +3887,189 @@ function HodDashboard({
     )
 
 
-  const selectedTicket =
+  const centerTotalPages =
+    Math.max(
+      1,
+      Math.ceil(
+        filteredQueue.length
+        / centerPageSize,
+      ),
+    )
+
+  const safeCenterPage =
+    Math.min(
+      centerPage,
+      centerTotalPages,
+    )
+
+  const centerVisible =
+    filteredQueue.slice(
+      (safeCenterPage - 1)
+      * centerPageSize,
+      safeCenterPage
+      * centerPageSize,
+    )
+
+  const centerSelectedTicket =
     allTickets.find(
       (ticket) =>
         ticketNumber(
           ticket,
         )
-        === selectedTicketNumber,
+        === centerReviewTicketNumber,
     )
-    || filteredQueue[0]
+    || null
+
+
+  const departmentFiltered =
+    useMemo(
+      () => {
+        const search =
+          departmentSearch
+            .trim()
+            .toLowerCase()
+
+        return allTickets
+          .filter(
+            (ticket) => {
+              const haystack =
+                [
+                  ticketNumber(ticket),
+                  ticket.subject,
+                  ticket.priority,
+                  ticket.status,
+                  ticket.assignee_name,
+                  ticket.desk_name,
+                ]
+                  .filter(Boolean)
+                  .join(' ')
+                  .toLowerCase()
+
+              const matchesSearch =
+                !search
+                || haystack.includes(search)
+
+              const matchesStatus =
+                departmentStatus === 'ALL'
+                || normalizedStatus(ticket.status)
+                === departmentStatus
+
+              return (
+                matchesSearch
+                && matchesStatus
+              )
+            },
+          )
+          .sort(
+            (first, second) =>
+              ticketRecencyValue(second)
+              - ticketRecencyValue(first),
+          )
+      },
+      [
+        allTickets,
+        departmentSearch,
+        departmentStatus,
+      ],
+    )
+
+  const departmentTotalPages =
+    Math.max(
+      1,
+      Math.ceil(
+        departmentFiltered.length
+        / departmentPageSize,
+      ),
+    )
+
+  const safeDepartmentPage =
+    Math.min(
+      departmentPage,
+      departmentTotalPages,
+    )
+
+  const departmentVisible =
+    departmentFiltered.slice(
+      (safeDepartmentPage - 1)
+      * departmentPageSize,
+      safeDepartmentPage
+      * departmentPageSize,
+    )
+
+
+  const routingTickets =
+    useMemo(
+      () => {
+        const search =
+          routingSearch
+            .trim()
+            .toLowerCase()
+
+        return openTickets
+          .filter(
+            (ticket) => {
+              const haystack =
+                [
+                  ticketNumber(ticket),
+                  ticket.subject,
+                  ticket.assignee_name,
+                  ticket.desk_name,
+                ]
+                  .filter(Boolean)
+                  .join(' ')
+                  .toLowerCase()
+
+              return (
+                !search
+                || haystack.includes(search)
+              )
+            },
+          )
+          .sort(
+            (first, second) =>
+              ticketRecencyValue(second)
+              - ticketRecencyValue(first),
+          )
+      },
+      [
+        openTickets,
+        routingSearch,
+      ],
+    )
+
+
+
+  const routingTotalPages =
+    Math.max(
+      1,
+      Math.ceil(
+        routingTickets.length
+        / routingPageSize,
+      ),
+    )
+
+  const safeRoutingPage =
+    Math.min(
+      routingPage,
+      routingTotalPages,
+    )
+
+  const routingVisible =
+    routingTickets.slice(
+      (safeRoutingPage - 1)
+      * routingPageSize,
+      safeRoutingPage
+      * routingPageSize,
+    )
+
+  const routingSelected =
+    routingTickets.find(
+      (ticket) =>
+        ticketNumber(
+          ticket,
+        )
+        === routingReviewTicketNumber,
+    )
     || null
 
 
@@ -2549,45 +4116,50 @@ function HodDashboard({
           ticket,
         )
 
+      const feedbackAction =
+        action === 'REASSIGN'
+          ? 'REASSIGN'
+          : action
 
       if (
         action === 'REASSIGN'
         && !officerId
       ) {
-        setErrorMessage(
-          'Select an officer before reassignment.',
-        )
+        setEscalationActionFeedback({
+          ticketNumber: number,
+          action: feedbackAction,
+          type: 'error',
+          message:
+            'Select an officer before reassignment.',
+        })
 
         return
       }
 
-
-      const label =
+      const confirmationMessage =
         action === 'REASSIGN'
-          ? 'reassign'
-          : action === 'APPROVE'
-            ? 'approve'
-            : 'reject'
-
+          ? `Are you sure you want to reassign ${number}?`
+          : `Are you sure you want to return ${number} for further work?`
 
       const confirmed =
         window.confirm(
-          `Are you sure you want to ${label} ${number}?`,
+          confirmationMessage,
         )
-
 
       if (!confirmed) {
         return
       }
 
-
       setActionLoading(
         `${number}-${action}`,
       )
 
-      setErrorMessage('')
-      setSuccessMessage('')
-
+      setEscalationActionFeedback({
+        ticketNumber: number,
+        action: feedbackAction,
+        type: '',
+        message: '',
+      })
 
       try {
         await performHodAction(
@@ -2597,23 +4169,417 @@ function HodDashboard({
           officerId,
         )
 
-        setSuccessMessage(
-          action === 'REASSIGN'
-            ? `${number} reassigned successfully.`
-            : `${number} ${action.toLowerCase()} action completed.`,
-        )
+        setEscalationActionFeedback({
+          ticketNumber: number,
+          action: feedbackAction,
+          type: 'success',
+          message:
+            action === 'REASSIGN'
+              ? `${number} reassigned successfully.`
+              : `${number} returned for further work.`,
+        })
 
         setSelectedOfficer('')
 
-        await loadDashboard()
-      } catch (error) {
-        setErrorMessage(
-          error.message
-          || 'HOD action could not be completed.',
+        window.setTimeout(
+          () => {
+            if (
+              action === 'REJECT'
+            ) {
+              setCenterReviewTicketNumber('')
+            }
+
+            void loadDashboard()
+          },
+          1200,
         )
+      } catch (error) {
+        setEscalationActionFeedback({
+          ticketNumber: number,
+          action: feedbackAction,
+          type: 'error',
+          message:
+            error.message
+            || 'HOD action could not be completed.',
+        })
       } finally {
         setActionLoading('')
       }
+    }
+
+
+  const handleOverrideDecision =
+    async (ticket) => {
+      const number =
+        ticketNumber(
+          ticket,
+        )
+
+      const cleanedReason =
+        overrideReason.trim()
+
+      if (
+        cleanedReason.length < 5
+      ) {
+        setEscalationActionFeedback({
+          ticketNumber: number,
+          action: 'OVERRIDE',
+          type: 'error',
+          message:
+            'Enter an override reason of at least 5 characters.',
+        })
+
+        return
+      }
+
+      if (
+        cleanedReason.length > 500
+      ) {
+        setEscalationActionFeedback({
+          ticketNumber: number,
+          action: 'OVERRIDE',
+          type: 'error',
+          message:
+            'Override reason cannot exceed 500 characters.',
+        })
+
+        return
+      }
+
+      const confirmed =
+        window.confirm(
+          `Override the escalation decision for ${number} and return it to the current officer for active work?`,
+        )
+
+      if (!confirmed) {
+        return
+      }
+
+      setActionLoading(
+        `${number}-OVERRIDE`,
+      )
+
+      setEscalationActionFeedback({
+        ticketNumber: number,
+        action: 'OVERRIDE',
+        type: '',
+        message: '',
+      })
+
+      try {
+        await overrideHodDecision(
+          accessToken,
+          number,
+          cleanedReason,
+        )
+
+        setEscalationActionFeedback({
+          ticketNumber: number,
+          action: 'OVERRIDE',
+          type: 'success',
+          message:
+            `${number} override recorded. The current officer can continue working on the query.`,
+        })
+
+        setOverrideReason('')
+        setSelectedOfficer('')
+        setResponseTicketNumber('')
+        setResponseDeliveryStatus('')
+
+        window.setTimeout(
+          () => {
+            setCenterReviewTicketNumber('')
+            void loadDashboard()
+          },
+          1200,
+        )
+      } catch (error) {
+        setEscalationActionFeedback({
+          ticketNumber: number,
+          action: 'OVERRIDE',
+          type: 'error',
+          message:
+            error.message
+            || 'The HOD override decision could not be completed.',
+        })
+      } finally {
+        setActionLoading('')
+      }
+    }
+
+
+  const handleEscalateToAdmin =
+    async (ticket) => {
+      const number =
+        ticketNumber(
+          ticket,
+        )
+
+      const cleanedReason =
+        adminEscalationReason.trim()
+
+      if (
+        cleanedReason.length < 5
+      ) {
+        setEscalationActionFeedback({
+          ticketNumber: number,
+          action: 'ESCALATE_ADMIN',
+          type: 'error',
+          message:
+            'Enter an Admin escalation reason of at least 5 characters.',
+        })
+
+        return
+      }
+
+      if (
+        cleanedReason.length > 500
+      ) {
+        setEscalationActionFeedback({
+          ticketNumber: number,
+          action: 'ESCALATE_ADMIN',
+          type: 'error',
+          message:
+            'Admin escalation reason cannot exceed 500 characters.',
+        })
+
+        return
+      }
+
+      const confirmed =
+        window.confirm(
+          `Escalate ${number} to the administrator for higher-level review?`,
+        )
+
+      if (!confirmed) {
+        return
+      }
+
+      setActionLoading(
+        `${number}-ESCALATE_ADMIN`,
+      )
+
+      setEscalationActionFeedback({
+        ticketNumber: number,
+        action: 'ESCALATE_ADMIN',
+        type: '',
+        message: '',
+      })
+
+      try {
+        const result =
+          await escalateHodToAdmin(
+            accessToken,
+            number,
+            cleanedReason,
+          )
+
+        const adminName =
+          result?.escalated_to_admin
+            ?.full_name
+          || 'the administrator'
+
+        setEscalationActionFeedback({
+          ticketNumber: number,
+          action: 'ESCALATE_ADMIN',
+          type: 'success',
+          message:
+            `${number} escalated successfully to ${adminName}.`,
+        })
+
+        setAdminEscalationReason('')
+        setOverrideReason('')
+        setSelectedOfficer('')
+        setResponseTicketNumber('')
+        setResponseDeliveryStatus('')
+
+        window.setTimeout(
+          () => {
+            setCenterReviewTicketNumber('')
+            void loadDashboard()
+          },
+          1200,
+        )
+      } catch (error) {
+        setEscalationActionFeedback({
+          ticketNumber: number,
+          action: 'ESCALATE_ADMIN',
+          type: 'error',
+          message:
+            error.message
+            || 'The query could not be escalated to Admin.',
+        })
+      } finally {
+        setActionLoading('')
+      }
+    }
+
+
+  const openReplyAndResolve =
+    (ticket) => {
+      const number =
+        ticketNumber(
+          ticket,
+        )
+
+      setResponseTicketNumber(
+        (current) =>
+          current === number
+            ? ''
+            : number,
+      )
+
+      setResponseDeliveryStatus('')
+
+      setEscalationActionFeedback({
+        ticketNumber: number,
+        action: 'REPLY_RESOLVE',
+        type: '',
+        message: '',
+      })
+    }
+
+
+  const resolveAfterDelivery =
+    async (ticket) => {
+      const number =
+        ticketNumber(
+          ticket,
+        )
+
+      if (
+        responseDeliveryStatus
+        !== 'SENT'
+      ) {
+        setEscalationActionFeedback({
+          ticketNumber: number,
+          action: 'REPLY_RESOLVE',
+          type: 'error',
+          message:
+            'Send the approved final response and wait until delivery status becomes SENT before resolving the query.',
+        })
+
+        return
+      }
+
+      const confirmed =
+        window.confirm(
+          `The final response for ${number} has been delivered. Resolve this query now?`,
+        )
+
+      if (!confirmed) {
+        return
+      }
+
+      setActionLoading(
+        `${number}-RESOLVE`,
+      )
+
+      setEscalationActionFeedback({
+        ticketNumber: number,
+        action: 'REPLY_RESOLVE',
+        type: '',
+        message: '',
+      })
+
+      try {
+        await resolveTicket(
+          accessToken,
+          number,
+        )
+
+        setEscalationActionFeedback({
+          ticketNumber: number,
+          action: 'REPLY_RESOLVE',
+          type: 'success',
+          message:
+            `${number} resolved successfully after final response delivery.`,
+        })
+
+        setResponseTicketNumber('')
+        setResponseDeliveryStatus('')
+
+        window.setTimeout(
+          () => {
+            setCenterReviewTicketNumber('')
+            void loadDashboard()
+          },
+          1200,
+        )
+      } catch (error) {
+        setEscalationActionFeedback({
+          ticketNumber: number,
+          action: 'REPLY_RESOLVE',
+          type: 'error',
+          message:
+            error.message
+            || 'The query could not be resolved.',
+        })
+      } finally {
+        setActionLoading('')
+      }
+    }
+
+
+  const toggleDepartmentReview =
+    (ticket) => {
+      const number =
+        ticketNumber(
+          ticket,
+        )
+
+      setDepartmentReviewTicketNumber(
+        (current) =>
+          current === number
+            ? ''
+            : number,
+      )
+    }
+
+
+  const toggleCenterReview =
+    (ticket) => {
+      const number =
+        ticketNumber(
+          ticket,
+        )
+
+      setCenterReviewTicketNumber(
+        (current) =>
+          current === number
+            ? ''
+            : number,
+      )
+
+      setSelectedOfficer('')
+      setOverrideReason('')
+      setAdminEscalationReason('')
+      setResponseTicketNumber('')
+      setResponseDeliveryStatus('')
+      setEscalationActionFeedback({
+        ticketNumber: '',
+        action: '',
+        type: '',
+        message: '',
+      })
+    }
+
+
+  const toggleRoutingReview =
+    (ticket) => {
+      const number =
+        ticketNumber(
+          ticket,
+        )
+
+      setRoutingReviewTicketNumber(
+        (current) =>
+          current === number
+            ? ''
+            : number,
+      )
+
+      setSelectedOfficer('')
     }
 
 
@@ -2636,12 +4602,7 @@ function HodDashboard({
 
 
   const escalationCount =
-    numberOf(
-      dashboardData
-        ?.metrics
-        ?.escalated_queries,
-    )
-    || escalatedTickets.length
+    escalatedTickets.length
 
 
   const centerContent = (
@@ -2679,7 +4640,7 @@ function HodDashboard({
           value={
             escalationCount
           }
-          subtitle="Requires HOD review"
+          subtitle="Currently awaiting HOD decision"
           tone="red"
           symbol="!"
         />
@@ -2717,137 +4678,153 @@ function HodDashboard({
       </div>
 
 
-      <div className="mt-4 grid items-start gap-4 xl:grid-cols-[1.65fr_0.85fr]">
+      <section className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white">
 
-        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
 
-          <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+          <div>
 
-            <div>
+            <h2 className="text-[16px] font-bold">
+              Action-required queries
+            </h2>
 
-              <h2 className="text-[16px] font-bold">
-                Action-required queries
-              </h2>
-
-              <p className="mt-1 text-[9px] text-slate-500">
-                Escalated, overdue, manual-review and unassigned cases
-              </p>
-
-            </div>
-
-
-            <div className="flex items-center gap-2">
-
-              <span className="rounded-full bg-rose-50 px-3 py-1 text-[8px] font-bold text-rose-600">
-                {
-                  filteredQueue.length
-                } OPEN
-              </span>
-
-
-              <select
-                value={
-                  queueFilter
-                }
-                onChange={
-                  (event) =>
-                    setQueueFilter(
-                      event.target.value,
-                    )
-                }
-                className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-[9px]"
-              >
-                <option value="ALL">
-                  All review cases
-                </option>
-
-                <option value="ESCALATED">
-                  Escalated
-                </option>
-
-                <option value="OVERDUE">
-                  SLA overdue
-                </option>
-
-                <option value="UNASSIGNED">
-                  Unassigned
-                </option>
-
-                <option value="MANUAL">
-                  Manual review
-                </option>
-
-              </select>
-
-            </div>
+            <p className="mt-1 text-[9px] text-slate-500">
+              Review each case directly below its row without leaving the escalation center.
+            </p>
 
           </div>
 
 
-          <div className="overflow-x-auto">
+          <span className="rounded-full bg-rose-50 px-3 py-1 text-[8px] font-bold text-rose-600">
+            {filteredQueue.length} {
+              queueFilter === 'ESCALATED'
+                ? 'OPEN'
+                : 'CASES'
+            }
+          </span>
 
-            <table className="w-full min-w-[780px]">
-
-              <thead>
-
-                <tr className="bg-slate-50 text-left text-[8px] font-bold uppercase text-slate-400">
-
-                  <th className="px-4 py-3">
-                    Query / Reason
-                  </th>
-
-                  <th className="px-4 py-3">
-                    Desk
-                  </th>
-
-                  <th className="px-4 py-3">
-                    Age
-                  </th>
-
-                  <th className="px-4 py-3">
-                    Current Owner
-                  </th>
-
-                  <th className="px-4 py-3">
-                    SLA
-                  </th>
-
-                  <th className="px-4 py-3">
-                    Action
-                  </th>
-
-                </tr>
-
-              </thead>
+        </div>
 
 
-              <tbody>
+        <div className="grid gap-3 border-b border-slate-100 p-4 md:grid-cols-[1fr_220px]">
 
-                {filteredQueue.map(
-                  (ticket) => {
-                    const sla =
-                      slaInfo(
-                        ticket.sla_due_at,
-                        currentTime,
-                      )
+          <div className="relative">
 
-                    const selected =
-                      ticketNumber(
-                        ticket,
-                      )
-                      === ticketNumber(
-                        selectedTicket,
-                      )
+            <Icon
+              name="search"
+              className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+            />
+
+            <input
+              type="search"
+              value={searchTerm}
+              onChange={(event) => {
+                setSearchTerm(
+                  event.target.value,
+                )
+                setCenterPage(1)
+                setCenterReviewTicketNumber('')
+                setSelectedOfficer('')
+              }}
+              placeholder="Search escalation, subject, desk or owner..."
+              className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-3 text-[9px] outline-none focus:border-blue-400 focus:bg-white"
+            />
+
+          </div>
 
 
-                    return (
+          <select
+            value={
+              queueFilter
+            }
+            onChange={(event) => {
+              setQueueFilter(
+                event.target.value,
+              )
+              setCenterPage(1)
+              setCenterReviewTicketNumber('')
+              setSelectedOfficer('')
+            }}
+            className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-[9px]"
+          >
+            <option value="ALL">
+              All review cases
+            </option>
+            <option value="ESCALATED">
+              Escalated
+            </option>
+            <option value="OVERDUE">
+              SLA overdue
+            </option>
+            <option value="UNASSIGNED">
+              Unassigned
+            </option>
+            <option value="MANUAL">
+              Manual review
+            </option>
+          </select>
+
+        </div>
+
+
+        <div className="overflow-x-auto">
+
+          <table className="w-full min-w-[860px]">
+
+            <thead>
+
+              <tr className="bg-slate-50 text-left text-[8px] font-bold uppercase text-slate-400">
+                <th className="px-4 py-3">
+                  Query / Reason
+                </th>
+                <th className="px-4 py-3">
+                  Desk
+                </th>
+                <th className="px-4 py-3">
+                  Age
+                </th>
+                <th className="px-4 py-3">
+                  Current Owner
+                </th>
+                <th className="px-4 py-3">
+                  SLA
+                </th>
+                <th className="px-4 py-3">
+                  Action
+                </th>
+              </tr>
+
+            </thead>
+
+
+            <tbody>
+
+              {centerVisible.map(
+                (ticket) => {
+                  const number =
+                    ticketNumber(
+                      ticket,
+                    )
+
+                  const selected =
+                    centerReviewTicketNumber
+                    === number
+
+                  const sla =
+                    slaInfo(
+                      ticket.sla_due_at,
+                      currentTime,
+                    )
+
+                  return (
+                    <Fragment
+                      key={
+                        ticket.ticket_id
+                        || number
+                      }
+                    >
+
                       <tr
-                        key={
-                          ticket.ticket_id
-                          || ticketNumber(
-                            ticket,
-                          )
-                        }
                         className={
                           'border-b border-slate-100 text-[9px] '
                           + (
@@ -2861,11 +4838,7 @@ function HodDashboard({
                         <td className="px-4 py-4">
 
                           <p className="font-semibold text-slate-800">
-                            {
-                              ticketNumber(
-                                ticket,
-                              )
-                            }
+                            {number}
                             {' · '}
                             {
                               cleanText(
@@ -2908,16 +4881,12 @@ function HodDashboard({
 
 
                         <td className="px-4 py-4">
-
-                          <p className="font-semibold text-slate-700">
-                            {
-                              cleanText(
-                                ticket.assignee_name
-                                || 'Unassigned',
-                              )
-                            }
-                          </p>
-
+                          {
+                            cleanText(
+                              ticket.assignee_name
+                              || 'Unassigned',
+                            )
+                          }
                         </td>
 
 
@@ -2927,14 +4896,11 @@ function HodDashboard({
                             className={
                               'rounded-full px-2 py-1 text-[7px] font-bold '
                               + (
-                                sla.tone
-                                === 'red'
+                                sla.tone === 'red'
                                   ? 'bg-rose-50 text-rose-600'
-                                  : sla.tone
-                                      === 'amber'
+                                  : sla.tone === 'amber'
                                     ? 'bg-amber-50 text-amber-700'
-                                    : sla.tone
-                                        === 'green'
+                                    : sla.tone === 'green'
                                       ? 'bg-emerald-50 text-emerald-700'
                                       : 'bg-slate-100 text-slate-500'
                               )
@@ -2950,267 +4916,733 @@ function HodDashboard({
 
                           <button
                             type="button"
-                            onClick={() => {
-                              setSelectedTicketNumber(
-                                ticketNumber(
-                                  ticket,
-                                ),
+                            onClick={() =>
+                              toggleCenterReview(
+                                ticket,
                               )
-
-                              setSelectedOfficer('')
-                            }}
+                            }
                             className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-[8px] font-semibold text-blue-700 hover:bg-blue-100"
                           >
-                            Review
+                            {
+                              selected
+                                ? 'Close ↑'
+                                : 'Review ↓'
+                            }
                           </button>
 
                         </td>
 
                       </tr>
-                    )
-                  },
-                )}
 
 
-                {filteredQueue.length === 0 && (
-                  <tr>
+                      {selected && (
+                        <tr className="border-b border-blue-100 bg-blue-50/20">
 
-                    <td
-                      colSpan="6"
-                      className="px-5 py-14 text-center text-[10px] text-slate-500"
-                    >
-                      No HOD review cases found.
-                    </td>
-
-                  </tr>
-                )}
-
-              </tbody>
-
-            </table>
-
-          </div>
-
-        </section>
-
-
-        <div className="space-y-4">
-
-          <WorkloadCard
-            workload={
-              workload
-            }
-          />
-
-
-          <section className="rounded-2xl border border-slate-200 bg-white p-5">
-
-            <h2 className="text-[15px] font-bold">
-              HOD decision controls
-            </h2>
-
-            <p className="mt-1 text-[9px] text-slate-500">
-              Authorized assignment and escalation actions
-            </p>
-
-
-            {selectedTicket
-              ? (
-                <div className="mt-4 space-y-3">
-
-                  <div className="rounded-xl bg-blue-50 p-3">
-
-                    <p className="font-mono text-[8px] font-bold text-blue-600">
-                      {
-                        ticketNumber(
-                          selectedTicket,
-                        )
-                      }
-                    </p>
-
-                    <p className="mt-1 text-[10px] font-semibold text-slate-800">
-                      {
-                        cleanText(
-                          selectedTicket.subject
-                          || 'Selected query',
-                        )
-                      }
-                    </p>
-
-                    <p className="mt-1 text-[8px] text-slate-500">
-                      {
-                        actionReason(
-                          selectedTicket,
-                        )
-                      }
-                    </p>
-
-                  </div>
-
-
-                  <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-3">
-
-                    <p className="text-[9px] font-bold">
-                      Reassign query
-                    </p>
-
-                    <p className="mt-1 text-[8px] text-slate-500">
-                      Balance workload and update current assignment.
-                    </p>
-
-
-                    <select
-                      value={
-                        selectedOfficer
-                      }
-                      onChange={
-                        (event) =>
-                          setSelectedOfficer(
-                            event.target.value,
-                          )
-                      }
-                      className="mt-3 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-[9px]"
-                    >
-                      <option value="">
-                        Select officer
-                      </option>
-
-                      {workload.map(
-                        (
-                          officer,
-                          index,
-                        ) => (
-                          <option
-                            key={
-                              officer.user_id
-                              || officer.id
-                              || index
-                            }
-                            value={
-                              officer.user_id
-                              || officer.id
-                              || ''
-                            }
+                          <td
+                            colSpan="6"
+                            className="px-4 py-4"
                           >
-                            {
-                              cleanText(
-                                officer.full_name
-                                || 'Officer',
-                              )
-                            }
-                            {' · '}
-                            {
-                              numberOf(
-                                officer.active_tickets,
-                              )
-                            } active
-                          </option>
-                        ),
+
+                            <div className="space-y-4">
+
+                              <QueryMetadataPanel
+                                ticket={
+                                  centerSelectedTicket
+                                  || ticket
+                                }
+                                currentTime={
+                                  currentTime
+                                }
+                                title="Escalation review"
+                              />
+
+
+                              <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+
+                                <section className="rounded-2xl border border-slate-200 bg-white p-4">
+
+                                  <h3 className="text-[11px] font-bold text-slate-900">
+                                    Reassign query
+                                  </h3>
+
+                                  <p className="mt-1 text-[8px] text-slate-500">
+                                    Move the query to another authorized department officer.
+                                  </p>
+
+
+                                  <select
+                                    value={
+                                      selectedOfficer
+                                    }
+                                    onChange={(event) =>
+                                      setSelectedOfficer(
+                                        event.target.value,
+                                      )
+                                    }
+                                    className="mt-3 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-[9px]"
+                                  >
+
+                                    <option value="">
+                                      Select officer
+                                    </option>
+
+                                    {eligibleReassignmentOfficers(
+                                      workload,
+                                      centerSelectedTicket
+                                      || ticket,
+                                    ).map(
+                                      (
+                                        officer,
+                                        index,
+                                      ) => (
+                                        <option
+                                          key={
+                                            officer.user_id
+                                            || officer.id
+                                            || index
+                                          }
+                                          value={
+                                            officer.user_id
+                                            || officer.id
+                                            || ''
+                                          }
+                                        >
+                                          {
+                                            cleanText(
+                                              officer.full_name
+                                              || 'Officer',
+                                            )
+                                          }
+                                          {' · '}
+                                          {
+                                            numberOf(
+                                              officer.active_tickets,
+                                            )
+                                          } active
+                                        </option>
+                                      ),
+                                    )}
+
+                                  </select>
+
+
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      performAction(
+                                        centerSelectedTicket
+                                        || ticket,
+                                        'REASSIGN',
+                                        selectedOfficer,
+                                      )
+                                    }
+                                    disabled={
+                                      !selectedOfficer
+                                      || Boolean(
+                                        actionLoading,
+                                      )
+                                    }
+                                    className="mt-3 w-full rounded-xl bg-blue-600 px-4 py-3 text-[9px] font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    {
+                                      actionLoading
+                                        === `${number}-REASSIGN`
+                                        ? 'Reassigning...'
+                                        : 'Reassign Query'
+                                    }
+                                  </button>
+
+
+                                  {
+                                    escalationActionFeedback.ticketNumber
+                                    === number
+                                    && escalationActionFeedback.action
+                                    === 'REASSIGN'
+                                    && escalationActionFeedback.message
+                                    && (
+                                      <div
+                                        className={
+                                          'mt-3 rounded-xl border p-3 text-[8px] leading-4 '
+                                          + (
+                                            escalationActionFeedback.type
+                                            === 'success'
+                                              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                              : 'border-rose-200 bg-rose-50 text-rose-700'
+                                          )
+                                        }
+                                      >
+                                        {
+                                          escalationActionFeedback.message
+                                        }
+                                      </div>
+                                    )
+                                  }
+
+                                </section>
+
+
+                                <section className="rounded-2xl border border-amber-200 bg-white p-4">
+
+                                  <h3 className="text-[11px] font-bold text-slate-900">
+                                    Override decision
+                                  </h3>
+
+                                  <p className="mt-1 text-[8px] leading-4 text-slate-500">
+                                    Keep the current officer assigned and return the escalated query to active work. A reason is required and is recorded in status history and audit logs.
+                                  </p>
+
+
+                                  {normalizedStatus(
+                                    (
+                                      centerSelectedTicket
+                                      || ticket
+                                    ).status,
+                                  ) === 'ESCALATED'
+                                    ? (
+                                      <>
+
+                                        <label
+                                          htmlFor={`override-reason-${number}`}
+                                          className="mt-3 block text-[8px] font-semibold text-slate-700"
+                                        >
+                                          Override reason
+                                        </label>
+
+                                        <textarea
+                                          id={`override-reason-${number}`}
+                                          rows={4}
+                                          maxLength={500}
+                                          value={
+                                            overrideReason
+                                          }
+                                          onChange={
+                                            (event) =>
+                                              setOverrideReason(
+                                                event.target.value,
+                                              )
+                                          }
+                                          placeholder="Example: The current officer should continue investigation because the escalation does not require reassignment."
+                                          disabled={
+                                            Boolean(
+                                              actionLoading,
+                                            )
+                                          }
+                                          className="mt-2 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[9px] leading-5 text-slate-700 outline-none transition focus:border-amber-300 focus:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                                        />
+
+                                        <div className="mt-1 flex items-center justify-between gap-2 text-[7px] text-slate-400">
+
+                                          <span>
+                                            Minimum 5 characters
+                                          </span>
+
+                                          <span>
+                                            {overrideReason.length}/500
+                                          </span>
+
+                                        </div>
+
+
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            handleOverrideDecision(
+                                              centerSelectedTicket
+                                              || ticket,
+                                            )
+                                          }
+                                          disabled={
+                                            overrideReason.trim().length
+                                            < 5
+                                            || Boolean(
+                                              actionLoading,
+                                            )
+                                          }
+                                          className="mt-3 w-full rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-[9px] font-semibold text-amber-700 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                          {
+                                            actionLoading
+                                            === `${number}-OVERRIDE`
+                                              ? 'Overriding...'
+                                              : 'Override Decision'
+                                          }
+                                        </button>
+
+                                      </>
+                                    )
+                                    : (
+                                      <p className="mt-3 rounded-xl bg-slate-50 p-3 text-[8px] leading-4 text-slate-500">
+                                        This query is currently {
+                                          normalizedStatus(
+                                            (
+                                              centerSelectedTicket
+                                              || ticket
+                                            ).status,
+                                          )
+                                          || 'OPEN'
+                                        }. Override is available only while a query is actively ESCALATED.
+                                      </p>
+                                    )}
+
+
+                                  {
+                                    escalationActionFeedback.ticketNumber
+                                    === number
+                                    && escalationActionFeedback.action
+                                    === 'OVERRIDE'
+                                    && escalationActionFeedback.message
+                                    && (
+                                      <div
+                                        className={
+                                          'mt-3 rounded-xl border p-3 text-[8px] leading-4 '
+                                          + (
+                                            escalationActionFeedback.type
+                                            === 'success'
+                                              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                              : 'border-rose-200 bg-rose-50 text-rose-700'
+                                          )
+                                        }
+                                      >
+                                        {
+                                          escalationActionFeedback.message
+                                        }
+                                      </div>
+                                    )
+                                  }
+
+                                </section>
+
+
+                                <section className="rounded-2xl border border-emerald-200 bg-white p-4">
+
+                                  <h3 className="text-[11px] font-bold text-slate-900">
+                                    Reply &amp; resolve
+                                  </h3>
+
+                                  <p className="mt-1 text-[8px] leading-4 text-slate-500">
+                                    Prepare or review the final response, approve it, send it to the student, then resolve the query after delivery is confirmed.
+                                  </p>
+
+
+                                  {normalizedStatus(
+                                    (
+                                      centerSelectedTicket
+                                      || ticket
+                                    ).status,
+                                  ) === 'ESCALATED'
+                                    ? (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          openReplyAndResolve(
+                                            centerSelectedTicket
+                                            || ticket,
+                                          )
+                                        }
+                                        disabled={
+                                          Boolean(
+                                            actionLoading,
+                                          )
+                                        }
+                                        className="mt-3 w-full rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-[9px] font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                      >
+                                        {
+                                          responseTicketNumber
+                                            === number
+                                            ? 'Close Response Workspace'
+                                            : 'Reply & Resolve'
+                                        }
+                                      </button>
+                                    )
+                                    : (
+                                      <p className="mt-3 rounded-xl bg-slate-50 p-3 text-[8px] leading-4 text-slate-500">
+                                        Direct HOD reply and resolution is available for escalated queries.
+                                      </p>
+                                    )}
+
+
+                                  {
+                                    escalationActionFeedback.ticketNumber
+                                    === number
+                                    && escalationActionFeedback.action
+                                    === 'REPLY_RESOLVE'
+                                    && escalationActionFeedback.message
+                                    && (
+                                      <div
+                                        className={
+                                          'mt-3 rounded-xl border p-3 text-[8px] leading-4 '
+                                          + (
+                                            escalationActionFeedback.type
+                                            === 'success'
+                                              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                              : 'border-rose-200 bg-rose-50 text-rose-700'
+                                          )
+                                        }
+                                      >
+                                        {
+                                          escalationActionFeedback.message
+                                        }
+                                      </div>
+                                    )
+                                  }
+
+                                </section>
+
+
+                                <section className="rounded-2xl border border-rose-200 bg-white p-4">
+
+                                  <h3 className="text-[11px] font-bold text-slate-900">
+                                    Escalate to Admin
+                                  </h3>
+
+                                  <p className="mt-1 text-[8px] leading-4 text-slate-500">
+                                    Send this escalated query to the system administrator when department-level HOD action is not sufficient. A reason is required.
+                                  </p>
+
+
+                                  {normalizedStatus(
+                                    (
+                                      centerSelectedTicket
+                                      || ticket
+                                    ).status,
+                                  ) === 'ESCALATED'
+                                    ? (
+                                      <>
+
+                                        <label
+                                          htmlFor={`admin-escalation-reason-${number}`}
+                                          className="mt-3 block text-[8px] font-semibold text-slate-700"
+                                        >
+                                          Escalation reason
+                                        </label>
+
+                                        <textarea
+                                          id={`admin-escalation-reason-${number}`}
+                                          rows={4}
+                                          maxLength={500}
+                                          value={
+                                            adminEscalationReason
+                                          }
+                                          onChange={
+                                            (event) =>
+                                              setAdminEscalationReason(
+                                                event.target.value,
+                                              )
+                                          }
+                                          placeholder="Example: This case requires administrator-level authority beyond the department."
+                                          disabled={
+                                            Boolean(
+                                              actionLoading,
+                                            )
+                                          }
+                                          className="mt-2 w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[9px] leading-5 text-slate-700 outline-none transition focus:border-rose-300 focus:bg-white disabled:cursor-not-allowed disabled:opacity-60"
+                                        />
+
+                                        <div className="mt-1 flex items-center justify-between gap-2 text-[7px] text-slate-400">
+
+                                          <span>
+                                            Minimum 5 characters
+                                          </span>
+
+                                          <span>
+                                            {adminEscalationReason.length}/500
+                                          </span>
+
+                                        </div>
+
+
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            handleEscalateToAdmin(
+                                              centerSelectedTicket
+                                              || ticket,
+                                            )
+                                          }
+                                          disabled={
+                                            adminEscalationReason.trim().length
+                                            < 5
+                                            || Boolean(
+                                              actionLoading,
+                                            )
+                                          }
+                                          className="mt-3 w-full rounded-xl border border-rose-200 bg-rose-50 px-3 py-3 text-[9px] font-semibold text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                        >
+                                          {
+                                            actionLoading
+                                            === `${number}-ESCALATE_ADMIN`
+                                              ? 'Escalating...'
+                                              : 'Escalate to Admin'
+                                          }
+                                        </button>
+
+                                      </>
+                                    )
+                                    : (
+                                      <p className="mt-3 rounded-xl bg-slate-50 p-3 text-[8px] leading-4 text-slate-500">
+                                        Admin escalation is available only while a query is actively ESCALATED.
+                                      </p>
+                                    )}
+
+
+                                  {
+                                    escalationActionFeedback.ticketNumber
+                                    === number
+                                    && escalationActionFeedback.action
+                                    === 'ESCALATE_ADMIN'
+                                    && escalationActionFeedback.message
+                                    && (
+                                      <div
+                                        className={
+                                          'mt-3 rounded-xl border p-3 text-[8px] leading-4 '
+                                          + (
+                                            escalationActionFeedback.type
+                                            === 'success'
+                                              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                              : 'border-rose-200 bg-rose-50 text-rose-700'
+                                          )
+                                        }
+                                      >
+                                        {
+                                          escalationActionFeedback.message
+                                        }
+                                      </div>
+                                    )
+                                  }
+
+                                </section>
+
+                              </div>
+
+
+                              {
+                                responseTicketNumber
+                                === number
+                                && (
+                                  <section className="rounded-2xl border border-emerald-200 bg-emerald-50/20 p-4">
+
+                                    <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+
+                                      <div>
+
+                                        <h3 className="text-[12px] font-bold text-slate-900">
+                                          HOD final response
+                                        </h3>
+
+                                        <p className="mt-1 text-[8px] leading-4 text-slate-500">
+                                          Save the response, approve it and send it to the student. SmartQuery will enable resolution only after Gmail delivery is confirmed.
+                                        </p>
+
+                                      </div>
+
+
+                                      <div className="flex items-center gap-2">
+
+                                        <span className="text-[8px] text-slate-500">
+                                          Delivery:
+                                        </span>
+
+                                        <span
+                                          className={
+                                            'rounded-full px-3 py-1 text-[7px] font-bold '
+                                            + (
+                                              responseDeliveryStatus
+                                              === 'SENT'
+                                                ? 'bg-emerald-100 text-emerald-700'
+                                                : responseDeliveryStatus
+                                                  === 'FAILED'
+                                                  ? 'bg-rose-100 text-rose-700'
+                                                  : responseDeliveryStatus
+                                                    === 'QUEUED'
+                                                    ? 'bg-blue-100 text-blue-700'
+                                                    : 'bg-slate-100 text-slate-600'
+                                            )
+                                          }
+                                        >
+                                          {
+                                            responseStatusLoading
+                                            && !responseDeliveryStatus
+                                              ? 'Checking...'
+                                              : (
+                                                  responseDeliveryStatus
+                                                  || 'Not sent'
+                                                )
+                                          }
+                                        </span>
+
+                                      </div>
+
+                                    </div>
+
+
+                                    <TicketResponseWorkspace
+                                      accessToken={
+                                        accessToken
+                                      }
+                                      ticketNumber={
+                                        number
+                                      }
+                                      onClose={() => {
+                                        setResponseTicketNumber('')
+                                        setResponseDeliveryStatus('')
+                                      }}
+                                    />
+
+
+                                    <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+
+                                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+
+                                        <div>
+
+                                          <p className="text-[9px] font-bold text-slate-900">
+                                            Final resolution
+                                          </p>
+
+                                          <p className="mt-1 text-[8px] leading-4 text-slate-500">
+                                            {
+                                              responseDeliveryStatus
+                                              === 'SENT'
+                                                ? 'The final response has been delivered. This query can now be resolved.'
+                                                : 'Resolution stays locked until the approved final response is delivered successfully.'
+                                            }
+                                          </p>
+
+                                        </div>
+
+
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            resolveAfterDelivery(
+                                              centerSelectedTicket
+                                              || ticket,
+                                            )
+                                          }
+                                          disabled={
+                                            responseDeliveryStatus
+                                            !== 'SENT'
+                                            || Boolean(
+                                              actionLoading,
+                                            )
+                                          }
+                                          className="shrink-0 rounded-xl bg-emerald-600 px-5 py-3 text-[9px] font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
+                                        >
+                                          {
+                                            actionLoading
+                                            === `${number}-RESOLVE`
+                                              ? 'Resolving...'
+                                              : 'Resolve Query'
+                                          }
+                                        </button>
+
+                                      </div>
+
+                                    </div>
+
+                                  </section>
+                                )
+                              }
+
+
+                              <div className="flex justify-end">
+
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    toggleCenterReview(
+                                      ticket,
+                                    )
+                                  }
+                                  className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-[8px] font-semibold text-slate-600 hover:bg-slate-50"
+                                >
+                                  Close review ↑
+                                </button>
+
+                              </div>
+
+                            </div>
+
+                          </td>
+
+                        </tr>
                       )}
 
-                    </select>
-
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        performAction(
-                          selectedTicket,
-                          'REASSIGN',
-                          selectedOfficer,
-                        )
-                      }
-                      disabled={
-                        !selectedOfficer
-                        || Boolean(
-                          actionLoading,
-                        )
-                      }
-                      className="mt-2 w-full rounded-lg bg-blue-600 px-3 py-2 text-[9px] font-semibold text-white disabled:opacity-50"
-                    >
-                      {
-                        actionLoading
-                        === `${ticketNumber(selectedTicket)}-REASSIGN`
-                          ? 'Reassigning...'
-                          : 'Reassign Selected Query'
-                      }
-                    </button>
-
-                  </div>
-
-
-                  {hasEscalation(
-                    selectedTicket,
-                  ) && (
-                    <div className="grid grid-cols-2 gap-2">
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          performAction(
-                            selectedTicket,
-                            'APPROVE',
-                          )
-                        }
-                        disabled={
-                          Boolean(
-                            actionLoading,
-                          )
-                        }
-                        className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-[9px] font-semibold text-emerald-700 disabled:opacity-50"
-                      >
-                        {
-                          actionLoading
-                          === `${ticketNumber(selectedTicket)}-APPROVE`
-                            ? 'Working...'
-                            : 'Approve'
-                        }
-                      </button>
-
-
-                      <button
-                        type="button"
-                        onClick={() =>
-                          performAction(
-                            selectedTicket,
-                            'REJECT',
-                          )
-                        }
-                        disabled={
-                          Boolean(
-                            actionLoading,
-                          )
-                        }
-                        className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-3 text-[9px] font-semibold text-rose-700 disabled:opacity-50"
-                      >
-                        {
-                          actionLoading
-                          === `${ticketNumber(selectedTicket)}-REJECT`
-                            ? 'Working...'
-                            : 'Reject'
-                        }
-                      </button>
-
-                    </div>
-                  )}
-
-                </div>
-              )
-              : (
-                <p className="mt-5 rounded-xl bg-slate-50 p-4 text-[9px] text-slate-500">
-                  Select a query to review HOD controls.
-                </p>
+                    </Fragment>
+                  )
+                },
               )}
 
-          </section>
+
+              {centerVisible.length === 0 && (
+                <tr>
+
+                  <td
+                    colSpan="6"
+                    className="px-5 py-14 text-center text-[10px] text-slate-500"
+                  >
+                    No HOD review cases found.
+                  </td>
+
+                </tr>
+              )}
+
+            </tbody>
+
+          </table>
 
         </div>
+
+
+        <PaginationBar
+          itemLabel="review cases"
+          page={
+            safeCenterPage
+          }
+          pageSize={
+            centerPageSize
+          }
+          totalItems={
+            filteredQueue.length
+          }
+          totalPages={
+            centerTotalPages
+          }
+          visibleCount={
+            centerVisible.length
+          }
+          onPageChange={(nextPage) => {
+            setCenterPage(
+              nextPage,
+            )
+            setCenterReviewTicketNumber('')
+            setSelectedOfficer('')
+          }}
+          onPageSizeChange={(nextPageSize) => {
+            setCenterPageSize(
+              nextPageSize,
+            )
+            setCenterPage(1)
+            setCenterReviewTicketNumber('')
+            setSelectedOfficer('')
+          }}
+        />
+
+      </section>
+
+
+      <div className="mt-4 max-w-4xl">
+
+        <WorkloadCard
+          workload={
+            workload
+          }
+        />
 
       </div>
 
     </>
   )
-
 
   let content =
     centerContent
@@ -3250,7 +5682,7 @@ function HodDashboard({
             value={
               escalationCount
             }
-            subtitle="Requires HOD action"
+            subtitle="Currently awaiting HOD decision"
             tone="red"
             symbol="!"
           />
@@ -3302,44 +5734,121 @@ function HodDashboard({
         <PageHeading
           eyebrow="HOD Portal / Department Queries"
           title="Department queries"
-          subtitle="Current queries visible through authorized HOD oversight."
+          subtitle="Search, filter and review queries visible through authorized HOD oversight."
         />
 
 
         <section className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white">
 
+          <div className="grid gap-3 border-b border-slate-100 p-4 md:grid-cols-[1fr_220px_auto]">
+
+            <div className="relative">
+
+              <Icon
+                name="search"
+                className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+              />
+
+              <input
+                type="search"
+                value={
+                  departmentSearch
+                }
+                onChange={(event) => {
+                  setDepartmentSearch(
+                    event.target.value,
+                  )
+                  setDepartmentPage(1)
+                  setDepartmentReviewTicketNumber('')
+                }}
+                placeholder="Search ticket, subject or owner..."
+                className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-3 text-[9px] outline-none focus:border-blue-400 focus:bg-white"
+              />
+
+            </div>
+
+
+            <select
+              value={
+                departmentStatus
+              }
+              onChange={(event) => {
+                setDepartmentStatus(
+                  event.target.value,
+                )
+                setDepartmentPage(1)
+                setDepartmentReviewTicketNumber('')
+              }}
+              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-[9px]"
+            >
+              <option value="ALL">
+                All statuses
+              </option>
+              <option value="ROUTED">
+                Routed
+              </option>
+              <option value="IN_PROGRESS">
+                In progress
+              </option>
+              <option value="NEEDS_INFORMATION">
+                Needs information
+              </option>
+              <option value="ESCALATED">
+                Escalated
+              </option>
+              <option value="RESOLVED">
+                Resolved
+              </option>
+              <option value="CLOSED">
+                Closed
+              </option>
+            </select>
+
+
+            <button
+              type="button"
+              onClick={() => {
+                setDepartmentSearch('')
+                setDepartmentStatus('ALL')
+                setDepartmentPage(1)
+                setDepartmentReviewTicketNumber('')
+              }}
+              className="rounded-xl border border-slate-200 bg-white px-4 text-[9px] font-semibold text-slate-600 hover:bg-slate-50"
+            >
+              Reset
+            </button>
+
+          </div>
+
+
           <div className="overflow-x-auto">
 
-            <table className="w-full min-w-[800px]">
+            <table className="w-full min-w-[900px]">
 
               <thead>
 
                 <tr className="bg-slate-50 text-left text-[8px] font-bold uppercase text-slate-400">
-
                   <th className="px-4 py-3">
                     Query
                   </th>
-
                   <th className="px-4 py-3">
                     Subject
                   </th>
-
                   <th className="px-4 py-3">
                     Priority
                   </th>
-
                   <th className="px-4 py-3">
                     Owner
                   </th>
-
                   <th className="px-4 py-3">
                     SLA
                   </th>
-
                   <th className="px-4 py-3">
                     Status
                   </th>
-
+                  <th className="px-4 py-3">
+                    Action
+                  </th>
                 </tr>
 
               </thead>
@@ -3347,105 +5856,185 @@ function HodDashboard({
 
               <tbody>
 
-                {allTickets.map(
+                {departmentVisible.map(
                   (ticket) => {
+                    const number =
+                      ticketNumber(
+                        ticket,
+                      )
+
+                    const selected =
+                      departmentReviewTicketNumber
+                      === number
+
                     const sla =
                       slaInfo(
                         ticket.sla_due_at,
                         currentTime,
                       )
 
-
                     return (
-                      <tr
+                      <Fragment
                         key={
                           ticket.ticket_id
-                          || ticketNumber(
-                            ticket,
-                          )
+                          || number
                         }
-                        className="border-b border-slate-100 text-[9px]"
                       >
 
-                        <td className="px-4 py-4 font-mono font-bold">
-                          {
-                            ticketNumber(
-                              ticket,
+                        <tr
+                          className={
+                            'border-b border-slate-100 text-[9px] '
+                            + (
+                              selected
+                                ? 'bg-blue-50/40'
+                                : ''
                             )
                           }
-                        </td>
+                        >
 
+                          <td className="px-4 py-4 font-mono font-bold">
+                            {number}
+                          </td>
 
-                        <td className="px-4 py-4">
-                          {
-                            cleanText(
-                              ticket.subject
-                              || 'No subject',
-                            )
-                          }
-                        </td>
-
-
-                        <td className="px-4 py-4">
-                          {
-                            ticket.priority
-                            || 'MEDIUM'
-                          }
-                        </td>
-
-
-                        <td className="px-4 py-4">
-                          {
-                            cleanText(
-                              ticket.assignee_name
-                              || 'Unassigned',
-                            )
-                          }
-                        </td>
-
-
-                        <td className="px-4 py-4">
-                          {sla.text}
-                        </td>
-
-
-                        <td className="px-4 py-4">
-
-                          <span
-                            className={
-                              'rounded-full border px-2 py-1 text-[7px] font-bold '
-                              + statusTone(
-                                ticket.status,
-                              )
-                            }
-                          >
+                          <td className="px-4 py-4">
                             {
-                              normalizedStatus(
-                                ticket.status,
+                              cleanText(
+                                ticket.subject
+                                || 'No subject',
                               )
-                                .replace(
-                                  /_/g,
-                                  ' ',
-                                )
                             }
-                          </span>
+                          </td>
 
-                        </td>
+                          <td className="px-4 py-4">
+                            {
+                              ticket.priority
+                              || 'MEDIUM'
+                            }
+                          </td>
 
-                      </tr>
+                          <td className="px-4 py-4">
+                            {
+                              cleanText(
+                                ticket.assignee_name
+                                || 'Unassigned',
+                              )
+                            }
+                          </td>
+
+                          <td className="px-4 py-4">
+                            {sla.text}
+                          </td>
+
+                          <td className="px-4 py-4">
+
+                            <span
+                              className={
+                                'rounded-full border px-2 py-1 text-[7px] font-bold '
+                                + statusTone(
+                                  ticket.status,
+                                )
+                              }
+                            >
+                              {
+                                normalizedStatus(
+                                  ticket.status,
+                                )
+                                  .replace(
+                                    /_/g,
+                                    ' ',
+                                  )
+                              }
+                            </span>
+
+                          </td>
+
+                          <td className="px-4 py-4">
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                toggleDepartmentReview(
+                                  ticket,
+                                )
+                              }
+                              className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[8px] font-semibold text-blue-700 hover:bg-blue-100"
+                            >
+                              {
+                                selected
+                                  ? 'Close ↑'
+                                  : 'Review ↓'
+                              }
+                            </button>
+
+                          </td>
+
+                        </tr>
+
+
+                        {selected && (
+                          <tr className="border-b border-blue-100 bg-blue-50/20">
+
+                            <td
+                              colSpan="7"
+                              className="px-4 py-4"
+                            >
+
+                              <div className="space-y-3">
+
+                                <QueryMetadataPanel
+                                  ticket={
+                                    ticket
+                                  }
+                                  currentTime={
+                                    currentTime
+                                  }
+                                  title="Department query review"
+                                />
+
+
+                                <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3">
+
+                                  <p className="max-w-3xl text-[8px] leading-4 text-slate-500">
+                                    This HOD endpoint currently exposes operational metadata, ownership and SLA information.
+                                    The full student message is not returned here, so this view does not invent missing content.
+                                  </p>
+
+
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      toggleDepartmentReview(
+                                        ticket,
+                                      )
+                                    }
+                                    className="rounded-lg border border-slate-200 px-4 py-2 text-[8px] font-semibold text-slate-600 hover:bg-slate-50"
+                                  >
+                                    Close review ↑
+                                  </button>
+
+                                </div>
+
+                              </div>
+
+                            </td>
+
+                          </tr>
+                        )}
+
+                      </Fragment>
                     )
                   },
                 )}
 
 
-                {allTickets.length === 0 && (
+                {departmentVisible.length === 0 && (
                   <tr>
 
                     <td
-                      colSpan="6"
+                      colSpan="7"
                       className="px-5 py-14 text-center text-[10px] text-slate-500"
                     >
-                      No department queries available.
+                      No matching department queries found.
                     </td>
 
                   </tr>
@@ -3457,12 +6046,44 @@ function HodDashboard({
 
           </div>
 
+
+          <PaginationBar
+            itemLabel="matching queries"
+            page={
+              safeDepartmentPage
+            }
+            pageSize={
+              departmentPageSize
+            }
+            totalItems={
+              departmentFiltered.length
+            }
+            totalPages={
+              departmentTotalPages
+            }
+            visibleCount={
+              departmentVisible.length
+            }
+            onPageChange={(nextPage) => {
+              setDepartmentPage(
+                nextPage,
+              )
+              setDepartmentReviewTicketNumber('')
+            }}
+            onPageSizeChange={(nextPageSize) => {
+              setDepartmentPageSize(
+                nextPageSize,
+              )
+              setDepartmentPage(1)
+              setDepartmentReviewTicketNumber('')
+            }}
+          />
+
         </section>
 
       </>
     )
   }
-
 
   if (
     page === 'routing'
@@ -3473,47 +6094,429 @@ function HodDashboard({
         <PageHeading
           eyebrow="Control & Oversight / Routing Overrides"
           title="Routing overrides"
-          subtitle="Review assignment problems and open the escalation center for authorized reassignment."
+          subtitle="Review an open query in place and apply an authorized reassignment without leaving this page."
         />
 
 
-        <div className="mt-5 max-w-2xl rounded-2xl border border-slate-200 bg-white p-6">
+        <section className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white">
 
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
-            <Icon
-              name="route"
-            />
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
+
+            <div className="relative min-w-[260px] flex-1">
+
+              <Icon
+                name="search"
+                className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+              />
+
+              <input
+                type="search"
+                value={
+                  routingSearch
+                }
+                onChange={(event) => {
+                  setRoutingSearch(
+                    event.target.value,
+                  )
+                  setRoutingPage(1)
+                  setRoutingReviewTicketNumber('')
+                  setSelectedOfficer('')
+                }}
+                placeholder="Search ticket, subject, desk or owner..."
+                className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-3 text-[9px] outline-none focus:border-blue-400 focus:bg-white"
+              />
+
+            </div>
+
+
+            <span className="rounded-full bg-blue-50 px-3 py-1 text-[8px] font-bold text-blue-700">
+              {routingTickets.length} OPEN
+            </span>
+
           </div>
 
-          <h2 className="mt-4 text-[15px] font-bold">
-            HOD routing decisions
-          </h2>
 
-          <p className="mt-2 text-[10px] leading-5 text-slate-500">
-            Current reassignment controls use the authenticated HOD action endpoint.
-            Review the affected query together with officer workload before applying
-            the change.
-          </p>
+          <div className="overflow-x-auto">
+
+            <table className="w-full min-w-[840px]">
+
+              <thead>
+
+                <tr className="bg-slate-50 text-left text-[8px] font-bold uppercase text-slate-400">
+                  <th className="px-4 py-3">
+                    Query
+                  </th>
+                  <th className="px-4 py-3">
+                    Subject
+                  </th>
+                  <th className="px-4 py-3">
+                    Desk
+                  </th>
+                  <th className="px-4 py-3">
+                    Current Owner
+                  </th>
+                  <th className="px-4 py-3">
+                    Status
+                  </th>
+                  <th className="px-4 py-3">
+                    Action
+                  </th>
+                </tr>
+
+              </thead>
 
 
-          <button
-            type="button"
-            onClick={() =>
-              navigate(
-                PATHS.center,
-              )
+              <tbody>
+
+                {routingVisible.map(
+                  (ticket) => {
+                    const number =
+                      ticketNumber(
+                        ticket,
+                      )
+
+                    const selected =
+                      routingReviewTicketNumber
+                      === number
+
+                    return (
+                      <Fragment
+                        key={
+                          ticket.ticket_id
+                          || number
+                        }
+                      >
+
+                        <tr
+                          className={
+                            'border-b border-slate-100 text-[9px] '
+                            + (
+                              selected
+                                ? 'bg-blue-50/40'
+                                : ''
+                            )
+                          }
+                        >
+
+                          <td className="px-4 py-4 font-mono font-bold">
+                            {number}
+                          </td>
+
+                          <td className="px-4 py-4 font-semibold text-slate-800">
+                            {
+                              cleanText(
+                                ticket.subject
+                                || 'No subject',
+                              )
+                            }
+                          </td>
+
+                          <td className="px-4 py-4 text-slate-600">
+                            {
+                              cleanText(
+                                ticket.desk_name
+                                || 'Department',
+                              )
+                            }
+                          </td>
+
+                          <td className="px-4 py-4 text-slate-600">
+                            {
+                              cleanText(
+                                ticket.assignee_name
+                                || 'Unassigned',
+                              )
+                            }
+                          </td>
+
+                          <td className="px-4 py-4">
+
+                            <span
+                              className={
+                                'rounded-full border px-2 py-1 text-[7px] font-bold '
+                                + statusTone(
+                                  ticket.status,
+                                )
+                              }
+                            >
+                              {
+                                normalizedStatus(
+                                  ticket.status,
+                                )
+                                  .replace(
+                                    /_/g,
+                                    ' ',
+                                  )
+                              }
+                            </span>
+
+                          </td>
+
+                          <td className="px-4 py-4">
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                toggleRoutingReview(
+                                  ticket,
+                                )
+                              }
+                              className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[8px] font-semibold text-blue-700 hover:bg-blue-100"
+                            >
+                              {
+                                selected
+                                  ? 'Close ↑'
+                                  : 'Review ↓'
+                              }
+                            </button>
+
+                          </td>
+
+                        </tr>
+
+
+                        {selected && (
+                          <tr className="border-b border-blue-100 bg-blue-50/20">
+
+                            <td
+                              colSpan="6"
+                              className="px-4 py-4"
+                            >
+
+                              <div className="space-y-4">
+
+                                <QueryMetadataPanel
+                                  ticket={
+                                    routingSelected
+                                    || ticket
+                                  }
+                                  currentTime={
+                                    currentTime
+                                  }
+                                  title="Routing decision"
+                                />
+
+
+                                <section className="rounded-2xl border border-blue-100 bg-white p-4">
+
+                                  <div className="flex flex-wrap items-start justify-between gap-3">
+
+                                    <div>
+
+                                      <h3 className="text-[11px] font-bold text-slate-900">
+                                        Reassign query
+                                      </h3>
+
+                                      <p className="mt-1 text-[8px] text-slate-500">
+                                        Select a new authorized officer. The backend HOD action endpoint records the reassignment.
+                                      </p>
+
+                                    </div>
+
+
+                                    <span className="rounded-full bg-slate-100 px-3 py-1 text-[7px] font-bold text-slate-600">
+                                      Current: {
+                                        cleanText(
+                                          (
+                                            routingSelected
+                                            || ticket
+                                          ).assignee_name
+                                          || 'Unassigned',
+                                        )
+                                      }
+                                    </span>
+
+                                  </div>
+
+
+                                  <div className="mt-4 grid gap-3 md:grid-cols-[1fr_auto]">
+
+                                    <select
+                                      value={
+                                        selectedOfficer
+                                      }
+                                      onChange={(event) =>
+                                        setSelectedOfficer(
+                                          event.target.value,
+                                        )
+                                      }
+                                      className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-[9px]"
+                                    >
+
+                                      <option value="">
+                                        Select new officer
+                                      </option>
+
+                                      {eligibleReassignmentOfficers(
+                                        workload,
+                                        routingSelected
+                                        || ticket,
+                                      ).map(
+                                        (
+                                          officer,
+                                          index,
+                                        ) => (
+                                          <option
+                                            key={
+                                              officer.user_id
+                                              || officer.id
+                                              || index
+                                            }
+                                            value={
+                                              officer.user_id
+                                              || officer.id
+                                              || ''
+                                            }
+                                          >
+                                            {
+                                              cleanText(
+                                                officer.full_name
+                                                || 'Officer',
+                                              )
+                                            }
+                                            {' · '}
+                                            {
+                                              numberOf(
+                                                officer.active_tickets,
+                                              )
+                                            } active
+                                          </option>
+                                        ),
+                                      )}
+
+                                    </select>
+
+
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        performAction(
+                                          routingSelected
+                                          || ticket,
+                                          'REASSIGN',
+                                          selectedOfficer,
+                                        )
+                                      }
+                                      disabled={
+                                        !selectedOfficer
+                                        || Boolean(
+                                          actionLoading,
+                                        )
+                                      }
+                                      className="rounded-xl bg-blue-600 px-5 py-3 text-[9px] font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      {
+                                        actionLoading
+                                          === `${number}-REASSIGN`
+                                          ? 'Reassigning...'
+                                          : 'Reassign Query'
+                                      }
+                                    </button>
+
+                                  </div>
+
+
+                                  <div className="mt-3 flex justify-end">
+
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        toggleRoutingReview(
+                                          ticket,
+                                        )
+                                      }
+                                      className="rounded-lg border border-slate-200 px-4 py-2 text-[8px] font-semibold text-slate-600 hover:bg-slate-50"
+                                    >
+                                      Close review ↑
+                                    </button>
+
+                                  </div>
+
+                                </section>
+
+                              </div>
+
+                            </td>
+
+                          </tr>
+                        )}
+
+                      </Fragment>
+                    )
+                  },
+                )}
+
+
+                {routingVisible.length === 0 && (
+                  <tr>
+
+                    <td
+                      colSpan="6"
+                      className="px-5 py-14 text-center text-[10px] text-slate-500"
+                    >
+                      No matching open queries.
+                    </td>
+
+                  </tr>
+                )}
+
+              </tbody>
+
+            </table>
+
+          </div>
+
+
+          <PaginationBar
+            itemLabel="open queries"
+            page={
+              safeRoutingPage
             }
-            className="mt-5 rounded-xl bg-blue-600 px-5 py-3 text-[10px] font-semibold text-white"
-          >
-            Open Escalation Center
-          </button>
+            pageSize={
+              routingPageSize
+            }
+            totalItems={
+              routingTickets.length
+            }
+            totalPages={
+              routingTotalPages
+            }
+            visibleCount={
+              routingVisible.length
+            }
+            onPageChange={(nextPage) => {
+              setRoutingPage(
+                nextPage,
+              )
+              setRoutingReviewTicketNumber('')
+              setSelectedOfficer('')
+            }}
+            onPageSizeChange={(nextPageSize) => {
+              setRoutingPageSize(
+                nextPageSize,
+              )
+              setRoutingPage(1)
+              setRoutingReviewTicketNumber('')
+              setSelectedOfficer('')
+            }}
+          />
+
+        </section>
+
+
+        <div className="mt-4 max-w-4xl">
+
+          <WorkloadCard
+            workload={
+              workload
+            }
+          />
 
         </div>
 
       </>
     )
   }
-
 
   if (
     page === 'workload'
@@ -3552,6 +6555,11 @@ function HodDashboard({
           ticket.is_overdue,
       )
 
+    const avgResolution =
+      dashboardData
+        ?.metrics
+        ?.avg_resolution_hours
+
 
     content = (
       <>
@@ -3559,17 +6567,31 @@ function HodDashboard({
         <PageHeading
           eyebrow="Control & Oversight / SLA Analytics"
           title="SLA analytics"
-          subtitle="Current SLA position derived from authorized department queries."
+          subtitle="Current SLA and resolution indicators derived from authorized department queries."
         />
 
 
-        <div className="mt-5 grid gap-3 sm:grid-cols-3">
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+
+          <Metric
+            title="Open Queries"
+            value={openTickets.length}
+            subtitle="Current department workload"
+            tone="blue"
+            symbol="Q"
+          />
+
+          <Metric
+            title="Escalated"
+            value={escalationCount}
+            subtitle="Requires HOD attention"
+            tone="red"
+            symbol="!"
+          />
 
           <Metric
             title="Within SLA"
-            value={
-              `${withinSla}%`
-            }
+            value={`${withinSla}%`}
             subtitle="Open department queries"
             tone="green"
             symbol="✓"
@@ -3577,9 +6599,7 @@ function HodDashboard({
 
           <Metric
             title="Due Today"
-            value={
-              dueToday.length
-            }
+            value={dueToday.length}
             subtitle="Due within 24 hours"
             tone="amber"
             symbol="T"
@@ -3587,12 +6607,23 @@ function HodDashboard({
 
           <Metric
             title="Overdue"
-            value={
-              overdue.length
-            }
+            value={overdue.length}
             subtitle="SLA already exceeded"
             tone="red"
             symbol="!"
+          />
+
+          <Metric
+            title="Avg Resolution"
+            value={
+              avgResolution === null
+                || avgResolution === undefined
+                ? '—'
+                : `${avgResolution}h`
+            }
+            subtitle="Resolved sample average"
+            tone="violet"
+            symbol="R"
           />
 
         </div>
@@ -3657,8 +6688,8 @@ function HodDashboard({
   ) {
     content = (
       <HodAuditHistoryPage
-        allTickets={
-          allTickets
+        accessToken={
+          accessToken
         }
       />
     )
@@ -3801,7 +6832,7 @@ function HodDashboard({
             icon="warning"
             label="Escalation Center"
             badge={
-              actionQueue.length
+              escalationCount
             }
             active={
               page === 'center'
@@ -4004,6 +7035,9 @@ function HodDashboard({
             <form
               onSubmit={(event) => {
                 event.preventDefault()
+                setCenterPage(1)
+                setCenterReviewTicketNumber('')
+                setSelectedOfficer('')
 
                 if (
                   page !== 'center'
@@ -4026,12 +7060,14 @@ function HodDashboard({
                 value={
                   searchTerm
                 }
-                onChange={
-                  (event) =>
-                    setSearchTerm(
-                      event.target.value,
-                    )
-                }
+                onChange={(event) => {
+                  setSearchTerm(
+                    event.target.value,
+                  )
+                  setCenterPage(1)
+                  setCenterReviewTicketNumber('')
+                  setSelectedOfficer('')
+                }}
                 placeholder="Search escalation or query..."
                 className="h-10 w-full rounded-full border border-slate-200 bg-slate-50 pl-11 pr-4 text-[9px] outline-none focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
               />
@@ -4105,16 +7141,9 @@ function HodDashboard({
             )}
 
 
-            {successMessage && (
-              <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-[10px] text-emerald-700">
-                {successMessage}
-              </div>
-            )}
-
-
             {
               loading
-              && !dashboardData
+                && !dashboardData
                 ? (
                   <div className="rounded-2xl border border-slate-200 bg-white py-20 text-center">
 

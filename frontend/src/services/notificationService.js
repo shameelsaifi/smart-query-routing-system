@@ -5,11 +5,13 @@ export async function getNotifications(
   accessToken,
   {
     limit = 20,
+    page = 1,
     signal,
   } = {},
 ) {
   const query = new URLSearchParams({
     limit: String(limit),
+    page: String(page),
   })
 
   const data = await apiRequest(

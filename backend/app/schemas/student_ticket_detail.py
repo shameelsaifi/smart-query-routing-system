@@ -2,11 +2,16 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.schemas.student_ticket import StudentTicketItem, TicketStatus
+from app.schemas.student_ticket import (
+    StudentTicketItem,
+    TicketStatus,
+)
 
 
 class StudentTicketDetailFilters(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+    )
 
     before_sequence: int | None = Field(
         default=None,
@@ -15,14 +20,18 @@ class StudentTicketDetailFilters(BaseModel):
     )
 
 
-class StudentTicketRecord(StudentTicketItem):
+class StudentTicketRecord(
+    StudentTicketItem,
+):
     message: str
     sla_due_at: datetime | None
     resolved_at: datetime | None
     closed_at: datetime | None
 
 
-class StudentTicketStatusEvent(BaseModel):
+class StudentTicketStatusEvent(
+    BaseModel,
+):
     history_id: str
     sequence: str
     previous_status: TicketStatus | None
@@ -30,7 +39,24 @@ class StudentTicketStatusEvent(BaseModel):
     changed_at: datetime
 
 
-class StudentTicketDetails(BaseModel):
+class StudentTicketFinalResponse(
+    BaseModel,
+):
+    response_id: str
+    final_response_text: str
+    responder_name: str | None = None
+    sent_at: datetime
+
+
+class StudentTicketDetails(
+    BaseModel,
+):
     ticket: StudentTicketRecord
-    history: list[StudentTicketStatusEvent]
+    final_response: (
+        StudentTicketFinalResponse
+        | None
+    ) = None
+    history: list[
+        StudentTicketStatusEvent
+    ]
     next_before_sequence: str | None = None

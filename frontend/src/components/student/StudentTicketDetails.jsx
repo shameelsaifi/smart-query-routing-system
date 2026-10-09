@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { getStudentTicketDetails } from '../../services/ticketService'
 import TicketAttachments from './TicketAttachments'
+import InformationExchange from '../staff/InformationExchange'
 
 const buttonClass = 'rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
 
 function statusLabel(value) {
+  if (!value) return 'Not recorded'
   const label = value.toLowerCase().replaceAll('_', ' ')
   return label.charAt(0).toUpperCase() + label.slice(1)
 }
@@ -14,7 +16,8 @@ function formatDate(value) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return 'Not recorded'
   return date.toLocaleString(undefined, {
-    dateStyle: 'medium', timeStyle: 'short',
+    dateStyle: 'medium',
+    timeStyle: 'short',
   })
 }
 
@@ -25,7 +28,12 @@ function StudentTicketDetails({ ticketNumber, accessToken, onBack }) {
   const olderRequest = useRef(null)
   const heading = useRef(null)
 
-  const requestKey = JSON.stringify([ticketNumber, accessToken, refreshVersion])
+  const requestKey = JSON.stringify([
+    ticketNumber,
+    accessToken,
+    refreshVersion,
+  ])
+
   const current = result?.key === requestKey ? result : null
   const loading = current === null
   const data = current?.data
@@ -38,11 +46,18 @@ function StudentTicketDetails({ ticketNumber, accessToken, onBack }) {
   useEffect(() => {
     olderRequest.current?.abort()
     olderRequest.current = null
+
     const controller = new AbortController()
 
-    getStudentTicketDetails(accessToken, ticketNumber, { signal: controller.signal })
+    getStudentTicketDetails(
+      accessToken,
+      ticketNumber,
+      { signal: controller.signal },
+    )
       .then((value) => {
-        if (!controller.signal.aborted) setResult({ key: requestKey, data: value })
+        if (!controller.signal.aborted) {
+          setResult({ key: requestKey, data: value })
+        }
       })
       .catch((error) => {
         if (!controller.signal.aborted) {
@@ -64,32 +79,45 @@ function StudentTicketDetails({ ticketNumber, accessToken, onBack }) {
 
   const loadEarlier = async () => {
     if (!data?.next_before_sequence || olderRequest.current) return
+
     const controller = new AbortController()
     olderRequest.current = controller
     setOlderState({ key: requestKey, loading: true })
 
     try {
-      const page = await getStudentTicketDetails(accessToken, ticketNumber, {
-        beforeSequence: data.next_before_sequence,
-        signal: controller.signal,
-      })
+      const page = await getStudentTicketDetails(
+        accessToken,
+        ticketNumber,
+        {
+          beforeSequence: data.next_before_sequence,
+          signal: controller.signal,
+        },
+      )
+
       if (controller.signal.aborted) return
 
       setResult((previous) => {
         if (previous?.key !== requestKey || !previous.data) return previous
-        const known = new Set(previous.data.history.map((event) => event.history_id))
+
+        const known = new Set(
+          previous.data.history.map((event) => event.history_id),
+        )
+
         return {
           ...previous,
           data: {
             ...previous.data,
             history: [
               ...previous.data.history,
-              ...page.history.filter((event) => !known.has(event.history_id)),
+              ...page.history.filter(
+                (event) => !known.has(event.history_id),
+              ),
             ],
             next_before_sequence: page.next_before_sequence,
           },
         }
       })
+
       setOlderState({ key: requestKey, loading: false })
     } catch (error) {
       if (!controller.signal.aborted) {
@@ -100,11 +128,15 @@ function StudentTicketDetails({ ticketNumber, accessToken, onBack }) {
         })
       }
     } finally {
-      if (olderRequest.current === controller) olderRequest.current = null
+      if (olderRequest.current === controller) {
+        olderRequest.current = null
+      }
     }
   }
 
   const ticket = data?.ticket
+  const finalResponse = data?.final_response
+
   const metadata = ticket ? [
     ['Current status', statusLabel(ticket.status)],
     ['Source', ticket.source === 'EMAIL' ? 'Email' : 'Web'],
@@ -120,74 +152,202 @@ function StudentTicketDetails({ ticketNumber, accessToken, onBack }) {
   ] : []
 
   return (
-    <section className="mx-auto max-w-5xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg" aria-busy={loading}>
+    <section
+      className="mx-auto max-w-5xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-lg"
+      aria-busy={loading}
+    >
       <div className="border-b border-slate-200 bg-slate-50 p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <button type="button" className={buttonClass} onClick={onBack}>Back to My Tickets</button>
-          <button type="button" className={buttonClass} onClick={refresh} disabled={loading}>Refresh details</button>
+          <button type="button" className={buttonClass} onClick={onBack}>
+            Back to My Tickets
+          </button>
+          <button
+            type="button"
+            className={buttonClass}
+            onClick={refresh}
+            disabled={loading}
+          >
+            Refresh details
+          </button>
         </div>
-        <p className="font-mono text-sm font-semibold text-blue-700">{ticketNumber}</p>
-        <h1 ref={heading} tabIndex={-1} className="mt-1 text-2xl font-bold text-slate-900">Ticket details</h1>
+
+        <p className="font-mono text-sm font-semibold text-blue-700">
+          {ticketNumber}
+        </p>
+        <h1
+          ref={heading}
+          tabIndex={-1}
+          className="mt-1 text-2xl font-bold text-slate-900"
+        >
+          Ticket details
+        </h1>
       </div>
 
-      {loading ? <p role="status" className="p-8 text-center text-slate-600">Loading ticket details...</p>
-        : current.error ? (
-          <div role="alert" className="m-5 rounded-xl bg-rose-50 p-4 text-rose-800">
-            <p>{current.error}</p>
-            <button type="button" className={buttonClass + ' mt-3'} onClick={refresh}>Retry</button>
+      {loading ? (
+        <p role="status" className="p-8 text-center text-slate-600">
+          Loading ticket details...
+        </p>
+      ) : current.error ? (
+        <div role="alert" className="m-5 rounded-xl bg-rose-50 p-4 text-rose-800">
+          <p>{current.error}</p>
+          <button
+            type="button"
+            className={buttonClass + ' mt-3'}
+            onClick={refresh}
+          >
+            Retry
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-6 p-5 sm:p-6">
+          <div>
+            <h2 className="break-words text-xl font-semibold text-slate-900">
+              {ticket.subject}
+            </h2>
+
+            <dl className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {metadata.map(([label, value]) => (
+                <div key={label}>
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    {label}
+                  </dt>
+                  <dd className="mt-1 break-words text-sm text-slate-800">
+                    {value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
           </div>
-        ) : (
-          <div className="space-y-6 p-5 sm:p-6">
-            <div>
-              <h2 className="break-words text-xl font-semibold text-slate-900">{ticket.subject}</h2>
-              <dl className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {metadata.map(([label, value]) => (
-                  <div key={label}>
-                    <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</dt>
-                    <dd className="mt-1 break-words text-sm text-slate-800">{value}</dd>
+
+          <div className="border-t border-slate-200 pt-5">
+            <h2 className="font-semibold text-slate-900">Your message</h2>
+            <p className="mt-3 whitespace-pre-wrap break-words rounded-xl bg-slate-50 p-4 text-sm leading-6">
+              {ticket.message}
+            </p>
+          </div>
+
+          <TicketAttachments
+            ticketNumber={ticketNumber}
+            accessToken={accessToken}
+          />
+
+          <InformationExchange
+            ticketNumber={ticketNumber}
+            accessToken={accessToken}
+          />
+
+          {finalResponse && (
+            <div className="border-t border-slate-200 pt-5">
+              <div className="overflow-hidden rounded-2xl border border-emerald-200 bg-emerald-50/60">
+                <div className="flex flex-wrap items-start justify-between gap-4 border-b border-emerald-100 px-5 py-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"
+                        aria-hidden="true"
+                      >
+                        ✓
+                      </span>
+                      <h2 className="text-lg font-bold text-slate-900">
+                        Final response
+                      </h2>
+                    </div>
+                    <p className="mt-2 text-sm text-slate-600">
+                      Response delivered by{' '}
+                      <span className="font-semibold text-slate-800">
+                        {finalResponse.responder_name || 'authorized staff'}
+                      </span>
+                    </p>
                   </div>
+
+                  <div className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold uppercase tracking-wide text-emerald-800">
+                    Delivered
+                  </div>
+                </div>
+
+                <div className="p-5">
+                  <p className="whitespace-pre-wrap break-words text-sm leading-7 text-slate-800">
+                    {finalResponse.final_response_text}
+                  </p>
+
+                  <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-emerald-100 pt-4 text-xs text-slate-500">
+                    <span>
+                      Sent:{' '}
+                      <strong className="font-semibold text-slate-700">
+                        {formatDate(finalResponse.sent_at)}
+                      </strong>
+                    </span>
+                    <span>
+                      Delivery:{' '}
+                      <strong className="font-semibold text-slate-700">
+                        University Gmail
+                      </strong>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="border-t border-slate-200 pt-5">
+            <h2 className="font-semibold text-slate-900">
+              Recorded status history
+            </h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Latest recorded changes first.
+            </p>
+
+            {data.history.length === 0 ? (
+              <p className="mt-4 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
+                No recorded status changes are available for this ticket.
+              </p>
+            ) : (
+              <ol className="mt-5 space-y-5 border-l-2 border-blue-100 pl-5">
+                {data.history.map((event) => (
+                  <li key={event.history_id}>
+                    <p className="text-sm font-semibold text-slate-800">
+                      {event.previous_status
+                        ? statusLabel(event.previous_status) + ' \u2192 '
+                        : ''}
+                      {statusLabel(event.new_status)}
+                    </p>
+                    <time
+                      dateTime={event.changed_at}
+                      className="mt-1 block text-xs text-slate-500"
+                    >
+                      {formatDate(event.changed_at)}
+                    </time>
+                  </li>
                 ))}
-              </dl>
-            </div>
+              </ol>
+            )}
 
-            <div className="border-t border-slate-200 pt-5">
-              <h2 className="font-semibold text-slate-900">Your message</h2>
-              <p className="mt-3 whitespace-pre-wrap break-words rounded-xl bg-slate-50 p-4 text-sm leading-6">{ticket.message}</p>
-            </div>
+            {older?.error && (
+              <p
+                role="alert"
+                className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-800"
+              >
+                {older.error}
+              </p>
+            )}
 
-            <TicketAttachments ticketNumber={ticketNumber} accessToken={accessToken} />
-
-            <div className="border-t border-slate-200 pt-5">
-              <h2 className="font-semibold text-slate-900">Recorded status history</h2>
-              <p className="mt-1 text-xs text-slate-500">Latest recorded changes first.</p>
-              {data.history.length === 0 ? (
-                <p className="mt-4 rounded-xl bg-slate-50 p-4 text-sm text-slate-600">
-                  No recorded status changes are available for this ticket.
-                </p>
-              ) : (
-                <ol className="mt-5 space-y-5 border-l-2 border-blue-100 pl-5">
-                  {data.history.map((event) => (
-                    <li key={event.history_id}>
-                      <p className="text-sm font-semibold text-slate-800">
-                        {event.previous_status ? statusLabel(event.previous_status) + ' \u2192 ' : ''}
-                        {statusLabel(event.new_status)}
-                      </p>
-                      <time dateTime={event.changed_at} className="mt-1 block text-xs text-slate-500">
-                        {formatDate(event.changed_at)}
-                      </time>
-                    </li>
-                  ))}
-                </ol>
-              )}
-              {older?.error && <p role="alert" className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-800">{older.error}</p>}
-              {data.next_before_sequence && (
-                <button type="button" className={buttonClass + ' mt-5'} onClick={loadEarlier} disabled={older?.loading}>
-                  {older?.loading ? 'Loading earlier changes...' : older?.error ? 'Retry earlier changes' : 'Load earlier changes'}
-                </button>
-              )}
-            </div>
+            {data.next_before_sequence && (
+              <button
+                type="button"
+                className={buttonClass + ' mt-5'}
+                onClick={loadEarlier}
+                disabled={older?.loading}
+              >
+                {older?.loading
+                  ? 'Loading earlier changes...'
+                  : older?.error
+                    ? 'Retry earlier changes'
+                    : 'Load earlier changes'}
+              </button>
+            )}
           </div>
-        )}
+        </div>
+      )}
     </section>
   )
 }

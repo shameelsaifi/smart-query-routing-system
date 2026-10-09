@@ -7,6 +7,7 @@ from app.api.v1.endpoints import (
     email_delivery,
     email_intake,
     health,
+    hod_audit,
     notifications,
     tickets,
 )
@@ -61,4 +62,10 @@ api_router.include_router(
     email_delivery.router,
     prefix="/email-delivery",
     tags=["Email Delivery"],
+)
+
+api_router.include_router(
+    hod_audit.router,
+    prefix="/hod",
+    tags=["HOD"],
 )

@@ -25,6 +25,9 @@ from app.services.email_delivery_service import (
     mark_email_delivery_sent,
     queue_response_delivery,
 )
+from app.services.hod_daily_summary_service import (
+    build_hod_daily_summary_payloads,
+)
 
 
 router = APIRouter()
@@ -53,6 +56,26 @@ def email_delivery_auth_check(
     }
 
 
+@router.get(
+    "/hod-daily-summaries",
+    summary=(
+        "Build daily Gmail summary "
+        "payloads for active HODs"
+    ),
+)
+def hod_daily_summaries(
+    response: Response,
+    _service: str = Depends(
+        require_email_delivery_service
+    ),
+) -> dict[str, Any]:
+    response.headers[
+        "Cache-Control"
+    ] = "no-store"
+
+    return build_hod_daily_summary_payloads()
+
+
 @router.post(
     "/responses/{response_id}/queue",
     response_model=EmailDeliveryQueueResponse,
@@ -67,6 +90,7 @@ def queue_email_response(
         require_role(
             "DEPARTMENT_STAFF",
             "INSTRUCTOR",
+            "HOD",
         )
     ),
 ) -> EmailDeliveryQueueResponse:

@@ -426,6 +426,28 @@ export function createInformationRequest(
 }
 
 
+export function getInformationExchange(
+  accessToken,
+  ticketNumber,
+  signal,
+) {
+  return apiRequest(
+    `/tickets/${encodeURIComponent(ticketNumber)}/information-exchange`,
+    {
+      accessToken,
+      signal,
+
+      cache:
+        'no-store',
+
+      errorMessage: (
+        'Information exchange could not be loaded.'
+      ),
+    },
+  )
+}
+
+
 export function getHodDashboard(
   accessToken,
   signal,

@@ -57,16 +57,28 @@ def list_notifications(
             ge=1,
             le=100,
         ),
-    ] = 50,
+    ] = 20,
+
+    page: Annotated[
+        int,
+        Query(
+            ge=1,
+        ),
+    ] = 1,
 ) -> NotificationListResponse:
     response.headers[
         "Cache-Control"
     ] = "no-store"
 
+    offset = (
+        page - 1
+    ) * limit
+
     return NotificationListResponse(
         **get_user_notifications(
             current_user,
             limit,
+            offset,
         )
     )
 

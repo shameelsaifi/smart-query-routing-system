@@ -1,11 +1,14 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.v1.router import api_router
 from app.core.config import settings
+from app.core.database import warm_database_pool
 from app.services.sla_escalation_worker import (
     sla_escalation_worker_loop,
 )
@@ -14,9 +17,26 @@ from app.services.ticket_processing_worker import (
 )
 
 
+logger = logging.getLogger(__name__)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     worker_tasks: list[asyncio.Task] = []
+
+    try:
+        await asyncio.to_thread(
+            warm_database_pool
+        )
+        logger.info(
+            "Database connection pool warmed successfully."
+        )
+
+    except SQLAlchemyError:
+        logger.exception(
+            "Database warm-up failed. "
+            "Application startup will continue."
+        )
 
     if settings.processing_worker_enabled:
         worker_tasks.append(
