@@ -1,12 +1,16 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 
 import NotificationBell from '../../components/notifications/NotificationBell'
 import StaffNotificationsPage from '../../components/staff/StaffNotificationsPage'
+import StaffReportsPage from '../../components/staff/StaffReportsPage'
 import InformationRequestWorkspace from '../../components/staff/InformationRequestWorkspace'
 import StaffDraftReviewPage from '../../components/staff/StaffDraftReviewPage'
 import TicketResponseWorkspace from '../../components/staff/TicketResponseWorkspace'
+import InformationExchange from '../../components/staff/InformationExchange'
+import TicketAttachments from '../../components/student/TicketAttachments'
 import { useAssignedTickets } from '../../hooks/useAssignedTickets'
+import { escalateTicketToHod } from '../../services/staffEscalationService'
 import { cleanText } from '../../utils/text'
 
 
@@ -717,53 +721,68 @@ function QueueTable({
   profile,
   now,
   onOpen,
+  expandedNumber = null,
+  renderExpanded = null,
 }) {
   return (
-    <div className="w-full min-w-0 overflow-x-auto">
+    <div className="w-full min-w-0 overflow-hidden">
 
-      <table className="min-w-[1120px] w-full table-fixed text-left">
+      <table className="w-full table-fixed text-left">
+
+        <colgroup>
+          <col className="w-[8%]" />
+          <col className="w-[16%]" />
+          <col className="w-[7%]" />
+          <col className="w-[11%]" />
+          <col className="w-[8%]" />
+          <col className="w-[9%]" />
+          <col className="w-[12%]" />
+          <col className="w-[12%]" />
+          <col className="w-[10%]" />
+          <col className="w-[7%]" />
+        </colgroup>
 
         <thead>
 
-          <tr className="bg-slate-50 text-[8px] font-bold uppercase tracking-[0.08em] text-slate-400">
+          <tr className="bg-slate-50 text-[7px] font-bold uppercase tracking-[0.06em] text-slate-400">
 
-            <th className="px-3 py-3">
+            <th className="px-2 py-3">
               Query
             </th>
 
-            <th className="px-3 py-3">
+            <th className="px-2 py-3">
               Student / Subject
             </th>
 
-            <th className="px-3 py-3">
+            <th className="px-2 py-3">
               Source
             </th>
 
-            <th className="px-3 py-3">
+            <th className="px-2 py-3">
               Category
             </th>
 
-            <th className="px-3 py-3">
+            <th className="px-2 py-3">
               Priority
             </th>
 
-            <th className="px-3 py-3">
+            <th className="px-2 py-3">
               Status
             </th>
 
-            <th className="px-3 py-3">
+            <th className="px-2 py-3">
               Age / SLA
             </th>
 
-            <th className="px-3 py-3">
+            <th className="px-2 py-3">
               Assigned To
             </th>
 
-            <th className="px-3 py-3">
+            <th className="px-2 py-3">
               AI Draft
             </th>
 
-            <th className="px-3 py-3">
+            <th className="px-2 py-3 text-center">
               Action
             </th>
 
@@ -803,18 +822,31 @@ function QueueTable({
                       || ticket.ai_draft_text,
                     )
 
+                  const ticketNumber =
+                    numberOf(
+                      ticket,
+                    )
+
+                  const rowKey =
+                    ticket.ticket_id
+                    || ticketNumber
+
+                  const expanded =
+                    expandedNumber
+                    === ticketNumber
+
                   return (
-                    <tr
+                    <Fragment
                       key={
-                        ticket.ticket_id
-                        || numberOf(
-                          ticket,
-                        )
+                        rowKey
                       }
-                      className="border-b border-slate-100 text-[9px] last:border-b-0"
                     >
 
-                      <td className="px-3 py-3.5 font-mono font-bold text-slate-800">
+                    <tr
+                      className="border-b border-slate-100 text-[8px]"
+                    >
+
+                      <td className="break-words px-2 py-3.5 font-mono font-bold text-slate-800">
                         {
                           numberOf(
                             ticket,
@@ -823,9 +855,9 @@ function QueueTable({
                       </td>
 
 
-                      <td className="px-3 py-3.5">
+                      <td className="px-2 py-3.5">
 
-                        <p className="truncate font-semibold text-slate-800">
+                        <p className="break-words font-semibold leading-4 text-slate-800">
                           {
                             cleanText(
                               ticket.student_name
@@ -834,7 +866,7 @@ function QueueTable({
                           }
                         </p>
 
-                        <p className="mt-0.5 truncate text-slate-500">
+                        <p className="mt-0.5 break-words leading-4 text-slate-500">
                           {
                             cleanText(
                               ticket.subject
@@ -846,11 +878,11 @@ function QueueTable({
                       </td>
 
 
-                      <td className="px-3 py-3.5">
+                      <td className="px-2 py-3.5">
 
                         <span
                           className={
-                            'rounded-full px-2 py-1 text-[7px] font-bold '
+                            'inline-flex max-w-full rounded-full px-2 py-1 text-[7px] font-bold '
                             + (
                               ticket.source
                                 === 'EMAIL'
@@ -879,7 +911,7 @@ function QueueTable({
                       </td>
 
 
-                      <td className="truncate px-3 py-3.5 text-slate-600">
+                      <td className="break-words px-2 py-3.5 leading-4 text-slate-600">
                         {
                           cleanText(
                             ticket.category
@@ -889,11 +921,11 @@ function QueueTable({
                       </td>
 
 
-                      <td className="px-3 py-3.5">
+                      <td className="px-2 py-3.5">
 
                         <span
                           className={
-                            'rounded-full px-2 py-1 text-[7px] font-bold '
+                            'inline-flex max-w-full rounded-full px-2 py-1 text-[7px] font-bold '
                             + priorityTone(
                               ticket.priority,
                             )
@@ -910,11 +942,11 @@ function QueueTable({
                       </td>
 
 
-                      <td className="px-3 py-3.5">
+                      <td className="px-2 py-3.5">
 
                         <span
                           className={
-                            'rounded-full border px-2 py-1 text-[7px] font-bold '
+                            'inline-flex max-w-full rounded-full border px-2 py-1 text-[7px] font-bold '
                             + statusTone(
                               ticket.status,
                             )
@@ -933,9 +965,9 @@ function QueueTable({
                       </td>
 
 
-                      <td className="px-3 py-3.5">
+                      <td className="px-2 py-3.5">
 
-                        <p className="font-semibold text-slate-700">
+                        <p className="font-semibold leading-4 text-slate-700">
                           {
                             age(
                               ticket,
@@ -946,7 +978,7 @@ function QueueTable({
 
                         <p
                           className={
-                            'mt-0.5 '
+                            'mt-0.5 break-words leading-4 '
                             + (
                               info.risk
                                 ? (
@@ -970,7 +1002,7 @@ function QueueTable({
                       </td>
 
 
-                      <td className="truncate px-3 py-3.5 text-slate-600">
+                      <td className="break-words px-2 py-3.5 leading-4 text-slate-600">
                         {
                           cleanText(
                             ticket.assigned_user_name
@@ -982,11 +1014,11 @@ function QueueTable({
                       </td>
 
 
-                      <td className="px-3 py-3.5">
+                      <td className="px-2 py-3.5">
 
                         <span
                           className={
-                            'rounded-full px-2 py-1 text-[7px] font-bold '
+                            'inline-flex max-w-full rounded-full px-2 py-1 text-[7px] font-bold '
                             + (
                               hasDraft
                                 ? (
@@ -1010,7 +1042,7 @@ function QueueTable({
                       </td>
 
 
-                      <td className="px-3 py-3.5">
+                      <td className="px-2 py-3.5 text-center">
 
                         <button
                           type="button"
@@ -1038,6 +1070,19 @@ function QueueTable({
                       </td>
 
                     </tr>
+
+                    {expanded && renderExpanded && (
+                      <tr className="border-b border-slate-100 bg-slate-50/60">
+                        <td
+                          colSpan="10"
+                          className="p-3"
+                        >
+                          {renderExpanded(ticket)}
+                        </td>
+                      </tr>
+                    )}
+
+                    </Fragment>
                   )
                 },
               )
@@ -1063,8 +1108,34 @@ function TicketPanel({
   setInfoTicket,
   handleStartWork,
   onInformationRequested,
+  onEscalated,
   onClose,
 }) {
+  const [
+    escalationOpen,
+    setEscalationOpen,
+  ] = useState(false)
+
+  const [
+    escalationReason,
+    setEscalationReason,
+  ] = useState('')
+
+  const [
+    escalating,
+    setEscalating,
+  ] = useState(false)
+
+  const [
+    escalationError,
+    setEscalationError,
+  ] = useState('')
+
+  const [
+    escalationSuccess,
+    setEscalationSuccess,
+  ] = useState('')
+
   if (!ticket) {
     return null
   }
@@ -1089,6 +1160,58 @@ function TicketPanel({
   const infoOpen =
     infoTicket
     === number
+
+  const canEscalateToHod =
+    [
+      'ROUTED',
+      'IN_PROGRESS',
+      'NEEDS_INFORMATION',
+    ].includes(
+      ticket.status,
+    )
+
+  const submitEscalation =
+    async () => {
+      const cleaned =
+        escalationReason.trim()
+
+      if (cleaned.length < 5) {
+        setEscalationError(
+          'Enter an escalation reason of at least 5 characters.',
+        )
+        return
+      }
+
+      setEscalating(true)
+      setEscalationError('')
+      setEscalationSuccess('')
+
+      try {
+        const result =
+          await escalateTicketToHod(
+            accessToken,
+            number,
+            cleaned,
+          )
+
+        setEscalationOpen(false)
+        setEscalationReason('')
+        setEscalationSuccess(
+          `Query ${number} escalated to ${result?.escalated_to?.full_name || 'the department HOD'}.`,
+        )
+
+        await onEscalated?.(
+          result,
+        )
+      } catch (error) {
+        setEscalationError(
+          error.message
+          || 'Query could not be escalated to the HOD.',
+        )
+      } finally {
+        setEscalating(false)
+      }
+    }
 
 
   return (
@@ -1203,6 +1326,18 @@ function TicketPanel({
               )
             }
           </p>
+
+          <div className="mt-5">
+            <TicketAttachments
+              ticketNumber={number}
+              accessToken={accessToken}
+            />
+          </div>
+
+          <InformationExchange
+            ticketNumber={number}
+            accessToken={accessToken}
+          />
 
         </div>
 
@@ -1392,6 +1527,117 @@ function TicketPanel({
             )}
 
 
+            {canEscalateToHod && (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 p-3">
+
+                <div className="flex items-start justify-between gap-3">
+
+                  <div>
+                    <p className="text-[9px] font-bold text-rose-800">
+                      Higher-authority escalation
+                    </p>
+                    <p className="mt-1 text-[9px] leading-4 text-rose-700">
+                      Escalate this unresolved query manually to the department HOD.
+                    </p>
+                  </div>
+
+                  {!escalationOpen && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEscalationOpen(true)
+                        setEscalationError('')
+                        setEscalationSuccess('')
+                      }}
+                      className="shrink-0 rounded-lg bg-rose-600 px-3 py-2 text-[9px] font-semibold text-white hover:bg-rose-700"
+                    >
+                      Escalate to HOD
+                    </button>
+                  )}
+
+                </div>
+
+                {escalationOpen && (
+                  <div className="mt-3 space-y-2">
+                    <textarea
+                      value={escalationReason}
+                      onChange={(event) => {
+                        setEscalationReason(
+                          event.target.value.slice(
+                            0,
+                            500,
+                          ),
+                        )
+                        setEscalationError('')
+                      }}
+                      rows={3}
+                      maxLength={500}
+                      placeholder="Explain why HOD review is required..."
+                      className="w-full resize-none rounded-xl border border-rose-200 bg-white px-3 py-2 text-[10px] text-slate-700 outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-100"
+                    />
+
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[8px] text-slate-400">
+                        {escalationReason.length}/500
+                      </span>
+
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEscalationOpen(false)
+                            setEscalationReason('')
+                            setEscalationError('')
+                          }}
+                          disabled={escalating}
+                          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[9px] font-semibold text-slate-600 disabled:opacity-50"
+                        >
+                          Cancel
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={submitEscalation}
+                          disabled={
+                            escalating
+                            || escalationReason.trim().length < 5
+                          }
+                          className="rounded-lg bg-rose-600 px-3 py-2 text-[9px] font-semibold text-white disabled:opacity-50"
+                        >
+                          {
+                            escalating
+                              ? 'Escalating...'
+                              : 'Confirm Escalation'
+                          }
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {escalationError && (
+                  <p className="mt-2 rounded-lg border border-rose-200 bg-white px-3 py-2 text-[9px] text-rose-700">
+                    {escalationError}
+                  </p>
+                )}
+
+                {escalationSuccess && (
+                  <p className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[9px] text-emerald-700">
+                    {escalationSuccess}
+                  </p>
+                )}
+
+              </div>
+            )}
+
+
+            {ticket.status === 'ESCALATED' && (
+              <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-[10px] text-rose-800">
+                This query is already in higher-authority escalation review. Duplicate staff escalation is disabled.
+              </div>
+            )}
+
+
             {
               ticket.status
               === 'NEEDS_INFORMATION'
@@ -1530,9 +1776,36 @@ function StaffDashboard({
   ] = useState(false)
 
   const [
+    queuePage,
+    setQueuePage,
+  ] = useState(1)
+
+  const [
+    queuePageSize,
+    setQueuePageSize,
+  ] = useState(10)
+
+  const [
+    simplePage,
+    setSimplePage,
+  ] = useState(1)
+
+  const [
+    simplePageSize,
+    setSimplePageSize,
+  ] = useState(10)
+
+  const [
     selected,
     setSelected,
-  ] = useState(null)
+  ] = useState(
+    () =>
+      new URLSearchParams(
+        location.search,
+      ).get(
+        'ticket',
+      ),
+  )
 
   const [
     responseTicket,
@@ -1648,7 +1921,7 @@ function StaffDashboard({
 
 
   const drafts =
-    tickets.filter(
+    openTickets.filter(
       (ticket) =>
         Boolean(
           ticket.ai_draft_reply
@@ -1698,13 +1971,26 @@ function StaffDashboard({
     )
 
 
+  const selectedFromUrl =
+    new URLSearchParams(
+      location.search,
+    ).get(
+      'ticket',
+    )
+
+
+  const selectedNumber =
+    selectedFromUrl
+    || selected
+
+
   const selectedTicket =
     tickets.find(
       (ticket) =>
         numberOf(
           ticket,
         )
-        === selected,
+        === selectedNumber,
     )
     || null
 
@@ -1777,6 +2063,49 @@ function StaffDashboard({
     )
 
 
+  const queueTotal =
+    filtered.length
+
+  const queueTotalPages =
+    Math.max(
+      1,
+
+      Math.ceil(
+        queueTotal
+        / queuePageSize,
+      ),
+    )
+
+  const currentQueuePage =
+    Math.min(
+      queuePage,
+      queueTotalPages,
+    )
+
+  const queueStartIndex =
+    queueTotal === 0
+      ? 0
+      : (
+        currentQueuePage
+        - 1
+      )
+      * queuePageSize
+
+  const queueEndIndex =
+    Math.min(
+      queueStartIndex
+      + queuePageSize,
+
+      queueTotal,
+    )
+
+  const paginatedFiltered =
+    filtered.slice(
+      queueStartIndex,
+      queueEndIndex,
+    )
+
+
   const go = (
     target,
   ) => {
@@ -1796,6 +2125,10 @@ function StaffDashboard({
       '',
     )
 
+    setSimplePage(
+      1,
+    )
+
     navigate(
       PATHS[
       target
@@ -1805,6 +2138,34 @@ function StaffDashboard({
 
 
   const openTicket = (
+    ticket,
+  ) => {
+    const ticketNumber =
+      numberOf(
+        ticket,
+      )
+
+    setSelected(
+      ticketNumber,
+    )
+
+    setResponseTicket(
+      null,
+    )
+
+    setInfoTicket(
+      null,
+    )
+
+    navigate(
+      `${PATHS.queue}?ticket=${encodeURIComponent(
+        ticketNumber,
+      )}`,
+    )
+  }
+
+
+  const openInlineTicket = (
     ticket,
   ) => {
     setSelected(
@@ -1819,6 +2180,10 @@ function StaffDashboard({
 
     setInfoTicket(
       null,
+    )
+
+    setLocalMessage(
+      '',
     )
   }
 
@@ -1847,19 +2212,17 @@ function StaffDashboard({
     setPriority('ALL')
     setStatus('OPEN')
     setSlaOnly(false)
+    setQueuePage(1)
   }
 
 
   const exportCsv = () => {
-    const quote = (
-      value,
-    ) =>
-      `"${String(
-        value ?? '',
-      ).replace(
-        /"/g,
-        '""',
-      )}"`
+    const quote = (value) => {
+      const raw = String(value ?? '')
+      // Treat student-controlled text as data, never a spreadsheet formula.
+      const safe = /^[\s]*[=+\-@]/.test(raw) ? `'${raw}` : raw
+      return `"${safe.replace(/"/g, '""')}"`
+    }
 
 
     const rows = [
@@ -2016,6 +2379,11 @@ function StaffDashboard({
 
   const detail = (
     <TicketPanel
+      key={
+        numberOf(
+          selectedTicket,
+        )
+      }
       ticket={
         selectedTicket
       }
@@ -2046,6 +2414,87 @@ function StaffDashboard({
       onInformationRequested={
         informationRequested
       }
+      onEscalated={async (result) => {
+        setResponseTicket(null)
+        setInfoTicket(null)
+
+        setLocalMessage(
+          `Ticket ${result?.ticket_number || numberOf(selectedTicket)} was escalated to ${result?.escalated_to?.full_name || 'the department HOD'}.`,
+        )
+
+        await loadTickets()
+      }}
+      onClose={() => {
+        setSelected(
+          null,
+        )
+
+        setResponseTicket(
+          null,
+        )
+
+        setInfoTicket(
+          null,
+        )
+
+        navigate(
+          PATHS.queue,
+          {
+            replace: true,
+          },
+        )
+      }}
+    />
+  )
+
+
+  const inlineDetail = (
+    <TicketPanel
+      key={
+        numberOf(
+          selectedTicket,
+        )
+      }
+      ticket={
+        selectedTicket
+      }
+      profile={
+        profile
+      }
+      accessToken={
+        accessToken
+      }
+      startingTicket={
+        startingTicket
+      }
+      responseTicket={
+        responseTicket
+      }
+      infoTicket={
+        infoTicket
+      }
+      setResponseTicket={
+        setResponseTicket
+      }
+      setInfoTicket={
+        setInfoTicket
+      }
+      handleStartWork={
+        handleStartWork
+      }
+      onInformationRequested={
+        informationRequested
+      }
+      onEscalated={async (result) => {
+        setResponseTicket(null)
+        setInfoTicket(null)
+
+        setLocalMessage(
+          `Ticket ${result?.ticket_number || numberOf(selectedTicket)} was escalated to ${result?.escalated_to?.full_name || 'the department HOD'}.`,
+        )
+
+        await loadTickets()
+      }}
       onClose={() => {
         setSelected(
           null,
@@ -2068,288 +2517,448 @@ function StaffDashboard({
 
       <Heading
         eyebrow={
-          `Queries / ${department}`
+          selectedNumber
+            ? (
+              `Queries / ${department} / ${selectedNumber}`
+            )
+            : (
+              `Queries / ${department}`
+            )
         }
-        title="Department query queue"
-        subtitle="Unified workspace for assigned queries with routing, SLA and human-review controls."
+        title={
+          selectedNumber
+            ? `Review ${selectedNumber}`
+            : 'Department query queue'
+        }
+        subtitle={
+          selectedNumber
+            ? (
+              'Focused review of the selected assigned query with routing, SLA and human-review controls.'
+            )
+            : (
+              'Unified workspace for assigned queries with routing, SLA and human-review controls.'
+            )
+        }
         action={
-          <button
-            type="button"
-            onClick={
-              loadTickets
-            }
-            disabled={
-              loading
-            }
-            className="flex items-center gap-2 rounded-xl border border-blue-200 bg-white px-4 py-2.5 text-[10px] font-semibold text-blue-700 disabled:opacity-50"
-          >
-            <Icon
-              name="refresh"
-              className="h-4 w-4"
-            />
+          selectedNumber
+            ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setSelected(
+                    null,
+                  )
 
-            Refresh Queue
-          </button>
+                  setResponseTicket(
+                    null,
+                  )
+
+                  setInfoTicket(
+                    null,
+                  )
+
+                  navigate(
+                    PATHS.queue,
+                  )
+                }}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[10px] font-semibold text-slate-700 hover:border-blue-200 hover:text-blue-700"
+              >
+                Back to Department Queue
+              </button>
+            )
+            : (
+              <button
+                type="button"
+                onClick={
+                  loadTickets
+                }
+                disabled={
+                  loading
+                }
+                className="flex items-center gap-2 rounded-xl border border-blue-200 bg-white px-4 py-2.5 text-[10px] font-semibold text-blue-700 disabled:opacity-50"
+              >
+                <Icon
+                  name="refresh"
+                  className="h-4 w-4"
+                />
+
+                Refresh Queue
+              </button>
+            )
         }
       />
 
 
-      {stats}
+      {selectedNumber
+        ? (
+          <>
+            {loading && !selectedTicket && (
+              <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-12 text-center text-xs text-slate-500">
+                Loading selected query...
+              </div>
+            )}
+
+            {!loading && !selectedTicket && (
+              <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-5 text-[10px] text-amber-800">
+                The selected query is not available in this staff account&apos;s assigned queue.
+              </div>
+            )}
+
+            {selectedTicket && detail}
+          </>
+        )
+        : (
+          <>
+            {stats}
 
 
-      <section className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_12px_30px_-25px_rgba(15,23,42,0.3)]">
+            <section className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_12px_30px_-25px_rgba(15,23,42,0.3)]">
 
-        <div className="flex items-center justify-between gap-3 px-5 py-4">
+              <div className="flex items-center justify-between gap-3 px-5 py-4">
 
-          <div>
+                <div>
 
-            <h2 className="text-[17px] font-bold text-slate-900">
-              Assigned queries
-            </h2>
+                  <h2 className="text-[17px] font-bold text-slate-900">
+                    Assigned queries
+                  </h2>
 
-            <p className="mt-0.5 text-[10px] text-slate-500">
-              Prioritized by source, priority, status and SLA state.
-            </p>
+                  <p className="mt-0.5 text-[10px] text-slate-500">
+                    Prioritized by source, priority, status and SLA state.
+                  </p>
 
-          </div>
-
-
-          <span className="rounded-full bg-blue-50 px-3 py-1 text-[9px] font-bold text-blue-700">
-            {filtered.length} visible
-          </span>
-
-        </div>
+                </div>
 
 
-        <div className="border-y border-slate-100 bg-slate-50/70 p-3">
+                <span className="rounded-full bg-blue-50 px-3 py-1 text-[9px] font-bold text-blue-700">
+                  {queueTotal} matching
+                </span>
 
-          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-[1.4fr_0.8fr_0.8fr_0.8fr_auto_auto]">
-
-            <div className="relative">
-
-              <Icon
-                name="search"
-                className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
-              />
-
-              <input
-                type="search"
-                value={
-                  search
-                }
-                onChange={
-                  (event) =>
-                    setSearch(
-                      event
-                        .target
-                        .value,
-                    )
-                }
-                placeholder="Search ID, student or subject..."
-                className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3 text-[10px] outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-              />
-
-            </div>
+              </div>
 
 
-            <select
-              value={
-                source
-              }
-              onChange={
-                (event) =>
-                  setSource(
-                    event
-                      .target
-                      .value,
+              <div className="border-y border-slate-100 bg-slate-50/70 p-3">
+
+                <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-[1.4fr_0.8fr_0.8fr_0.8fr_auto_auto]">
+
+                  <div className="relative">
+
+                    <Icon
+                      name="search"
+                      className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                    />
+
+                    <input
+                      type="search"
+                      value={
+                        search
+                      }
+                      onChange={(event) => {
+                        setSearch(
+                          event
+                            .target
+                            .value,
+                        )
+
+                        setQueuePage(1)
+                      }}
+                      placeholder="Search ID, student or subject..."
+                      className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3 text-[10px] outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    />
+
+                  </div>
+
+
+                  <select
+                    value={
+                      source
+                    }
+                    onChange={(event) => {
+                      setSource(
+                        event
+                          .target
+                          .value,
+                      )
+
+                      setQueuePage(1)
+                    }}
+                    className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-[10px]"
+                  >
+                    <option value="ALL">
+                      Source: All
+                    </option>
+
+                    <option value="WEB">
+                      Web
+                    </option>
+
+                    <option value="EMAIL">
+                      Gmail
+                    </option>
+
+                  </select>
+
+
+                  <select
+                    value={
+                      priority
+                    }
+                    onChange={(event) => {
+                      setPriority(
+                        event
+                          .target
+                          .value,
+                      )
+
+                      setQueuePage(1)
+                    }}
+                    className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-[10px]"
+                  >
+                    <option value="ALL">
+                      Priority: All
+                    </option>
+
+                    <option value="LOW">
+                      Low
+                    </option>
+
+                    <option value="MEDIUM">
+                      Medium
+                    </option>
+
+                    <option value="HIGH">
+                      High
+                    </option>
+
+                    <option value="URGENT">
+                      Urgent
+                    </option>
+
+                  </select>
+
+
+                  <select
+                    value={
+                      status
+                    }
+                    onChange={(event) => {
+                      setStatus(
+                        event
+                          .target
+                          .value,
+                      )
+
+                      setQueuePage(1)
+                    }}
+                    className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-[10px]"
+                  >
+                    <option value="OPEN">
+                      Status: Open
+                    </option>
+
+                    <option value="ALL">
+                      All statuses
+                    </option>
+
+                    <option value="ROUTED">
+                      Assigned
+                    </option>
+
+                    <option value="IN_PROGRESS">
+                      In review
+                    </option>
+
+                    <option value="NEEDS_INFORMATION">
+                      Waiting
+                    </option>
+
+                    <option value="ESCALATED">
+                      Escalated
+                    </option>
+
+                    <option value="RESOLVED">
+                      Resolved
+                    </option>
+
+                    <option value="CLOSED">
+                      Closed
+                    </option>
+
+                  </select>
+
+
+                  <label className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[9px] font-semibold text-slate-600">
+
+                    <input
+                      type="checkbox"
+                      checked={
+                        slaOnly
+                      }
+                      onChange={(event) => {
+                        setSlaOnly(
+                          event
+                            .target
+                            .checked,
+                        )
+
+                        setQueuePage(1)
+                      }}
+                    />
+
+                    SLA risk only
+
+                  </label>
+
+
+                  <button
+                    type="button"
+                    onClick={
+                      reset
+                    }
+                    className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-[10px] font-semibold text-slate-600"
+                  >
+                    Reset
+                  </button>
+
+                </div>
+
+              </div>
+
+
+              {
+                loading
+                  ? (
+                    <p className="p-12 text-center text-xs text-slate-500">
+                      Loading assigned queries...
+                    </p>
+                  )
+
+                  : (
+                    <QueueTable
+                      items={
+                        paginatedFiltered
+                      }
+                      profile={
+                        profile
+                      }
+                      now={
+                        now
+                      }
+                      onOpen={
+                        openTicket
+                      }
+                    />
                   )
               }
-              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-[10px]"
-            >
-              <option value="ALL">
-                Source: All
-              </option>
-
-              <option value="WEB">
-                Web
-              </option>
-
-              <option value="EMAIL">
-                Gmail
-              </option>
-
-            </select>
 
 
-            <select
-              value={
-                priority
-              }
-              onChange={
-                (event) =>
-                  setPriority(
-                    event
-                      .target
-                      .value,
-                  )
-              }
-              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-[10px]"
-            >
-              <option value="ALL">
-                Priority: All
-              </option>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-4 text-[9px] text-slate-500">
 
-              <option value="LOW">
-                Low
-              </option>
-
-              <option value="MEDIUM">
-                Medium
-              </option>
-
-              <option value="HIGH">
-                High
-              </option>
-
-              <option value="URGENT">
-                Urgent
-              </option>
-
-            </select>
+                <span>
+                  {
+                    queueTotal === 0
+                      ? 'Showing 0 of 0 matching queries'
+                      : (
+                        `Showing ${queueStartIndex + 1}-${queueEndIndex} of ${queueTotal} matching queries`
+                      )
+                  }
+                  {' · '}
+                  {tickets.length} assigned total
+                </span>
 
 
-            <select
-              value={
-                status
-              }
-              onChange={
-                (event) =>
-                  setStatus(
-                    event
-                      .target
-                      .value,
-                  )
-              }
-              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-[10px]"
-            >
-              <option value="OPEN">
-                Status: Open
-              </option>
+                <div className="flex flex-wrap items-center gap-2">
 
-              <option value="ALL">
-                All statuses
-              </option>
+                  <label className="flex items-center gap-2">
+                    <span>
+                      Per page
+                    </span>
 
-              <option value="ROUTED">
-                Assigned
-              </option>
+                    <select
+                      value={
+                        queuePageSize
+                      }
+                      onChange={(event) => {
+                        setQueuePageSize(
+                          Number(
+                            event
+                              .target
+                              .value,
+                          ),
+                        )
 
-              <option value="IN_PROGRESS">
-                In review
-              </option>
+                        setQueuePage(1)
+                      }}
+                      className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-[9px] font-semibold text-slate-700"
+                    >
+                      <option value="10">
+                        10
+                      </option>
 
-              <option value="NEEDS_INFORMATION">
-                Waiting
-              </option>
+                      <option value="20">
+                        20
+                      </option>
 
-              <option value="ESCALATED">
-                Escalated
-              </option>
-
-              <option value="RESOLVED">
-                Resolved
-              </option>
-
-              <option value="CLOSED">
-                Closed
-              </option>
-
-            </select>
+                      <option value="50">
+                        50
+                      </option>
+                    </select>
+                  </label>
 
 
-            <label className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-[9px] font-semibold text-slate-600">
-
-              <input
-                type="checkbox"
-                checked={
-                  slaOnly
-                }
-                onChange={
-                  (event) =>
-                    setSlaOnly(
-                      event
-                        .target
-                        .checked,
-                    )
-                }
-              />
-
-              SLA risk only
-
-            </label>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setQueuePage(
+                        Math.max(
+                          1,
+                          currentQueuePage - 1,
+                        ),
+                      )
+                    }
+                    disabled={
+                      currentQueuePage <= 1
+                    }
+                    className="h-8 rounded-lg border border-slate-200 bg-white px-3 font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Previous
+                  </button>
 
 
-            <button
-              type="button"
-              onClick={
-                reset
-              }
-              className="h-10 rounded-xl border border-slate-200 bg-white px-4 text-[10px] font-semibold text-slate-600"
-            >
-              Reset
-            </button>
-
-          </div>
-
-        </div>
+                  <span className="min-w-[76px] text-center font-semibold text-slate-600">
+                    Page {currentQueuePage} of {queueTotalPages}
+                  </span>
 
 
-        {
-          loading
-            ? (
-              <p className="p-12 text-center text-xs text-slate-500">
-                Loading assigned queries...
-              </p>
-            )
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setQueuePage(
+                        Math.min(
+                          queueTotalPages,
+                          currentQueuePage + 1,
+                        ),
+                      )
+                    }
+                    disabled={
+                      currentQueuePage
+                      >= queueTotalPages
+                    }
+                    className="h-8 rounded-lg border border-slate-200 bg-white px-3 font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Next
+                  </button>
 
-            : (
-              <QueueTable
-                items={
-                  filtered
-                }
-                profile={
-                  profile
-                }
-                now={
-                  now
-                }
-                onOpen={
-                  openTicket
-                }
-              />
-            )
-        }
+                </div>
 
+              </div>
 
-        <div className="flex justify-between gap-3 border-t border-slate-100 px-5 py-4 text-[9px] text-slate-500">
-
-          <span>
-            Showing {filtered.length} of {tickets.length} assigned queries
-          </span>
-
-          <span>
-            All workflow updates remain auditable.
-          </span>
-
-        </div>
-
-      </section>
-
-
-      {detail}
+            </section>
+          </>
+        )}
 
     </section>
   )
+
 
 
   const simpleTablePage = (
@@ -2357,46 +2966,214 @@ function StaffDashboard({
     title,
     subtitle,
     items,
-  ) => (
-    <section>
+    itemLabel = 'assigned queries',
+  ) => {
+    const totalItems =
+      items.length
 
-      <Heading
-        eyebrow={
-          eyebrow
-        }
-        title={
-          title
-        }
-        subtitle={
-          subtitle
-        }
-      />
+    const totalPages =
+      Math.max(
+        1,
 
+        Math.ceil(
+          totalItems
+          / simplePageSize,
+        ),
+      )
 
-      <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+    const currentPage =
+      Math.min(
+        simplePage,
+        totalPages,
+      )
 
-        <QueueTable
-          items={
-            items
+    const startIndex =
+      totalItems === 0
+        ? 0
+        : (
+          currentPage
+          - 1
+        )
+        * simplePageSize
+
+    const endIndex =
+      Math.min(
+        startIndex
+        + simplePageSize,
+
+        totalItems,
+      )
+
+    const pageItems =
+      items.slice(
+        startIndex,
+        endIndex,
+      )
+
+    const visibleSelected =
+      selected
+      && pageItems.some(
+        (ticket) =>
+          numberOf(
+            ticket,
+          )
+          === selected,
+      )
+        ? selected
+        : null
+
+    return (
+      <section>
+
+        <Heading
+          eyebrow={
+            eyebrow
           }
-          profile={
-            profile
+          title={
+            title
           }
-          now={
-            now
-          }
-          onOpen={
-            openTicket
+          subtitle={
+            subtitle
           }
         />
 
-      </div>
+
+        <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+
+          <QueueTable
+            items={
+              pageItems
+            }
+            profile={
+              profile
+            }
+            now={
+              now
+            }
+            onOpen={
+              openInlineTicket
+            }
+            expandedNumber={
+              visibleSelected
+            }
+            renderExpanded={() =>
+              inlineDetail
+            }
+          />
 
 
-      {detail}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-3 text-[9px] text-slate-500">
 
-    </section>
-  )
+            <span>
+              {
+                totalItems === 0
+                  ? `Showing 0 of 0 ${itemLabel}`
+                  : (
+                    `Showing ${startIndex + 1}-${endIndex} of ${totalItems} ${itemLabel}`
+                  )
+              }
+            </span>
+
+
+            <div className="flex flex-wrap items-center gap-2">
+
+              <label className="flex items-center gap-2">
+                <span>
+                  Per page
+                </span>
+
+                <select
+                  value={
+                    simplePageSize
+                  }
+                  onChange={(event) => {
+                    setSimplePageSize(
+                      Number(
+                        event.target.value,
+                      ),
+                    )
+
+                    setSimplePage(1)
+                    setSelected(null)
+                    setResponseTicket(null)
+                    setInfoTicket(null)
+                  }}
+                  className="h-8 rounded-lg border border-slate-200 bg-white px-2 font-semibold text-slate-600"
+                >
+                  <option value="10">
+                    10
+                  </option>
+
+                  <option value="20">
+                    20
+                  </option>
+
+                  <option value="50">
+                    50
+                  </option>
+                </select>
+              </label>
+
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSimplePage(
+                    Math.max(
+                      1,
+                      currentPage - 1,
+                    ),
+                  )
+
+                  setSelected(null)
+                  setResponseTicket(null)
+                  setInfoTicket(null)
+                }}
+                disabled={
+                  currentPage <= 1
+                }
+                className="h-8 rounded-lg border border-slate-200 bg-white px-3 font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Previous
+              </button>
+
+
+              <span className="min-w-[74px] text-center font-semibold text-slate-600">
+                Page {currentPage} of {totalPages}
+              </span>
+
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSimplePage(
+                    Math.min(
+                      totalPages,
+                      currentPage + 1,
+                    ),
+                  )
+
+                  setSelected(null)
+                  setResponseTicket(null)
+                  setInfoTicket(null)
+                }}
+                disabled={
+                  currentPage >= totalPages
+                }
+                className="h-8 rounded-lg border border-slate-200 bg-white px-3 font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Next
+              </button>
+
+            </div>
+
+          </div>
+
+        </div>
+
+      </section>
+    )
+  }
 
 
   const statusCounts = [
@@ -2566,10 +3343,6 @@ function StaffDashboard({
                         )
                       }
                       onClick={() => {
-                        navigate(
-                          '/staff',
-                        )
-
                         openTicket(
                           ticket,
                         )
@@ -2843,6 +3616,41 @@ function StaffDashboard({
   )
 
 
+  const escalatedHighUrgent =
+    escalations.filter(
+      (ticket) =>
+        [
+          'HIGH',
+          'URGENT',
+        ].includes(
+          String(
+            ticket.priority
+            || '',
+          ).toUpperCase(),
+        ),
+    )
+
+
+  const escalatedSlaRisk =
+    escalations.filter(
+      (ticket) =>
+        sla(
+          ticket,
+          now,
+        ).risk,
+    )
+
+
+  const escalatedDrafts =
+    escalations.filter(
+      (ticket) =>
+        Boolean(
+          ticket.ai_draft_reply
+          || ticket.ai_draft_text,
+        ),
+    )
+
+
   const routing = (
     <section>
 
@@ -2856,9 +3664,20 @@ function StaffDashboard({
             onClick={
               loadTickets
             }
-            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-[10px] font-semibold"
+            disabled={
+              loading
+            }
+            className="flex min-w-[128px] items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-[10px] font-semibold text-slate-700 disabled:cursor-wait disabled:opacity-70"
           >
-            Refresh status
+            {loading && (
+              <span className="h-3 w-3 animate-spin rounded-full border-2 border-blue-200 border-t-blue-600" />
+            )}
+
+            {
+              loading
+                ? 'Refreshing...'
+                : 'Refresh status'
+            }
           </button>
         }
       />
@@ -2875,114 +3694,132 @@ function StaffDashboard({
                   now,
                 )
 
+              const ticketNumber =
+                numberOf(
+                  ticket,
+                )
+
+              const expanded =
+                selected
+                === ticketNumber
+
               return (
-                <button
-                  type="button"
+                <Fragment
                   key={
                     ticket.ticket_id
-                    || numberOf(
-                      ticket,
-                    )
+                    || ticketNumber
                   }
-                  onClick={() => {
-                    navigate(
-                      '/staff',
-                    )
-
-                    openTicket(
-                      ticket,
-                    )
-                  }}
-                  className="rounded-2xl border border-slate-200 bg-white p-4 text-left hover:border-blue-200"
                 >
 
-                  <div className="flex justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      openInlineTicket(
+                        ticket,
+                      )
+                    }}
+                    className={
+                      'rounded-2xl border bg-white p-4 text-left transition hover:border-blue-200 '
+                      + (
+                        expanded
+                          ? 'border-blue-300 ring-2 ring-blue-100'
+                          : 'border-slate-200'
+                      )
+                    }
+                  >
 
-                    <div className="min-w-0">
+                    <div className="flex justify-between gap-3">
 
-                      <p className="font-mono text-[8px] font-bold text-blue-600">
-                        {
-                          numberOf(
-                            ticket,
-                          )
-                        }
-                      </p>
+                      <div className="min-w-0">
 
-                      <p className="mt-1 truncate text-[10px] font-semibold">
-                        {
-                          cleanText(
-                            ticket.subject
-                            || 'Untitled query',
-                          )
-                        }
-                      </p>
+                        <p className="font-mono text-[8px] font-bold text-blue-600">
+                          {ticketNumber}
+                        </p>
 
-                    </div>
+                        <p className="mt-1 truncate text-[10px] font-semibold">
+                          {
+                            cleanText(
+                              ticket.subject
+                              || 'Untitled query',
+                            )
+                          }
+                        </p>
 
-
-                    <span
-                      className={
-                        'h-fit rounded-full border px-2 py-1 text-[7px] font-bold '
-                        + statusTone(
-                          ticket.status,
-                        )
-                      }
-                    >
-                      {
-                        STATUS_LABELS[
-                        ticket.status
-                        ]
-                        || ticket.status
-                      }
-                    </span>
-
-                  </div>
+                      </div>
 
 
-                  <div className="mt-4 grid grid-cols-2 gap-2">
-
-                    <div className="rounded-xl bg-slate-50 p-3">
-
-                      <p className="text-[8px] text-slate-400">
-                        Category
-                      </p>
-
-                      <p className="mt-1 truncate text-[9px] font-semibold">
-                        {
-                          cleanText(
-                            ticket.category
-                            || department,
-                          )
-                        }
-                      </p>
-
-                    </div>
-
-
-                    <div className="rounded-xl bg-slate-50 p-3">
-
-                      <p className="text-[8px] text-slate-400">
-                        SLA
-                      </p>
-
-                      <p
+                      <span
                         className={
-                          'mt-1 text-[9px] font-semibold '
-                          + (
-                            info.risk
-                              ? 'text-rose-600'
-                              : ''
+                          'h-fit rounded-full border px-2 py-1 text-[7px] font-bold '
+                          + statusTone(
+                            ticket.status,
                           )
                         }
                       >
-                        {info.main}
-                      </p>
+                        {
+                          STATUS_LABELS[
+                          ticket.status
+                          ]
+                          || ticket.status
+                        }
+                      </span>
 
                     </div>
 
-                  </div>
 
-                </button>
+                    <div className="mt-4 grid grid-cols-2 gap-2">
+
+                      <div className="rounded-xl bg-slate-50 p-3">
+
+                        <p className="text-[8px] text-slate-400">
+                          Category
+                        </p>
+
+                        <p className="mt-1 truncate text-[9px] font-semibold">
+                          {
+                            cleanText(
+                              ticket.category
+                              || department,
+                            )
+                          }
+                        </p>
+
+                      </div>
+
+
+                      <div className="rounded-xl bg-slate-50 p-3">
+
+                        <p className="text-[8px] text-slate-400">
+                          SLA
+                        </p>
+
+                        <p
+                          className={
+                            'mt-1 text-[9px] font-semibold '
+                            + (
+                              info.risk
+                                ? 'text-rose-600'
+                                : ''
+                            )
+                          }
+                        >
+                          {info.main}
+                        </p>
+
+                      </div>
+
+                    </div>
+
+                  </button>
+
+
+                  {expanded && (
+                    <div className="md:col-span-2 xl:col-span-3">
+                      {inlineDetail}
+                    </div>
+                  )}
+
+                </Fragment>
               )
             },
           )
@@ -3001,6 +3838,330 @@ function StaffDashboard({
   )
 
 
+  const escalationPage = (() => {
+    const totalItems =
+      escalations.length
+
+    const totalPages =
+      Math.max(
+        1,
+
+        Math.ceil(
+          totalItems
+          / simplePageSize,
+        ),
+      )
+
+    const currentPage =
+      Math.min(
+        simplePage,
+        totalPages,
+      )
+
+    const startIndex =
+      totalItems === 0
+        ? 0
+        : (
+          currentPage
+          - 1
+        )
+        * simplePageSize
+
+    const endIndex =
+      Math.min(
+        startIndex
+        + simplePageSize,
+
+        totalItems,
+      )
+
+    const pageItems =
+      escalations.slice(
+        startIndex,
+        endIndex,
+      )
+
+    const visibleSelected =
+      selected
+      && pageItems.some(
+        (ticket) =>
+          numberOf(
+            ticket,
+          )
+          === selected,
+      )
+        ? selected
+        : null
+
+    return (
+      <section>
+
+        <Heading
+          eyebrow="Smart Routing & SLA / Escalations"
+          title="Escalation tracking"
+          subtitle="Track assigned queries that have moved to higher-authority review while retaining authorized follow-up access."
+          action={
+            <button
+              type="button"
+              onClick={
+                loadTickets
+              }
+              disabled={
+                loading
+              }
+              className="flex min-w-[146px] items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-[10px] font-semibold text-slate-700 disabled:cursor-wait disabled:opacity-70"
+            >
+              {loading && (
+                <span className="h-3 w-3 animate-spin rounded-full border-2 border-rose-200 border-t-rose-600" />
+              )}
+
+              {
+                loading
+                  ? 'Refreshing...'
+                  : 'Refresh escalations'
+              }
+            </button>
+          }
+        />
+
+
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+
+          <Stat
+            icon="alert"
+            label="Active Escalations"
+            value={
+              loading
+                ? '—'
+                : escalations.length
+            }
+            note="Currently escalated assignments"
+            tone="rose"
+          />
+
+          <Stat
+            icon="alert"
+            label="High / Urgent"
+            value={
+              loading
+                ? '—'
+                : escalatedHighUrgent.length
+            }
+            note="Priority escalations"
+            tone="amber"
+          />
+
+          <Stat
+            icon="clock"
+            label="SLA Risk"
+            value={
+              loading
+                ? '—'
+                : escalatedSlaRisk.length
+            }
+            note="Due soon or overdue"
+            tone="amber"
+          />
+
+          <Stat
+            icon="draft"
+            label="Drafts Ready"
+            value={
+              loading
+                ? '—'
+                : escalatedDrafts.length
+            }
+            note="AI-assisted response available"
+            tone="violet"
+          />
+
+        </div>
+
+
+        <div className="mt-5 rounded-2xl border border-blue-100 bg-blue-50/70 px-5 py-4">
+
+          <div className="flex flex-wrap items-start justify-between gap-3">
+
+            <div>
+
+              <p className="text-[10px] font-bold text-blue-900">
+                Escalation path
+              </p>
+
+              <p className="mt-1 text-[9px] leading-5 text-blue-800">
+                Department Staff / Instructor → HOD → Admin. This page tracks queries already escalated; escalation decisions are handled by the authorized higher-level portal.
+              </p>
+
+            </div>
+
+            <span className="rounded-full border border-blue-200 bg-white px-3 py-1 text-[8px] font-bold text-blue-700">
+              STAFF TRACKING VIEW
+            </span>
+
+          </div>
+
+        </div>
+
+
+        <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+
+            <div>
+
+              <h2 className="text-[16px] font-bold text-slate-900">
+                Escalated queries assigned to you
+              </h2>
+
+              <p className="mt-1 text-[9px] text-slate-500">
+                Open a row to review the exact query, AI analysis and authorized response controls without leaving this page.
+              </p>
+
+            </div>
+
+            <span className="rounded-full bg-rose-50 px-3 py-1 text-[8px] font-bold text-rose-600">
+              {totalItems} ACTIVE
+            </span>
+
+          </div>
+
+
+          <QueueTable
+            items={
+              pageItems
+            }
+            profile={
+              profile
+            }
+            now={
+              now
+            }
+            onOpen={
+              openInlineTicket
+            }
+            expandedNumber={
+              visibleSelected
+            }
+            renderExpanded={() =>
+              inlineDetail
+            }
+          />
+
+
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-3 text-[9px] text-slate-500">
+
+            <span>
+              {
+                totalItems === 0
+                  ? 'Showing 0 of 0 escalated queries'
+                  : (
+                    `Showing ${startIndex + 1}-${endIndex} of ${totalItems} escalated queries`
+                  )
+              }
+            </span>
+
+
+            <div className="flex flex-wrap items-center gap-2">
+
+              <label className="flex items-center gap-2">
+                <span>
+                  Per page
+                </span>
+
+                <select
+                  value={
+                    simplePageSize
+                  }
+                  onChange={(event) => {
+                    setSimplePageSize(
+                      Number(
+                        event.target.value,
+                      ),
+                    )
+
+                    setSimplePage(1)
+                    setSelected(null)
+                    setResponseTicket(null)
+                    setInfoTicket(null)
+                  }}
+                  className="h-8 rounded-lg border border-slate-200 bg-white px-2 font-semibold text-slate-600"
+                >
+                  <option value="10">
+                    10
+                  </option>
+
+                  <option value="20">
+                    20
+                  </option>
+
+                  <option value="50">
+                    50
+                  </option>
+                </select>
+              </label>
+
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSimplePage(
+                    Math.max(
+                      1,
+                      currentPage - 1,
+                    ),
+                  )
+
+                  setSelected(null)
+                  setResponseTicket(null)
+                  setInfoTicket(null)
+                }}
+                disabled={
+                  currentPage <= 1
+                }
+                className="h-8 rounded-lg border border-slate-200 bg-white px-3 font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Previous
+              </button>
+
+
+              <span className="min-w-[74px] text-center font-semibold text-slate-600">
+                Page {currentPage} of {totalPages}
+              </span>
+
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSimplePage(
+                    Math.min(
+                      totalPages,
+                      currentPage + 1,
+                    ),
+                  )
+
+                  setSelected(null)
+                  setResponseTicket(null)
+                  setInfoTicket(null)
+                }}
+                disabled={
+                  currentPage >= totalPages
+                }
+                className="h-8 rounded-lg border border-slate-200 bg-white px-3 font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Next
+              </button>
+
+            </div>
+
+          </div>
+
+        </div>
+
+      </section>
+    )
+  })()
+
+
   const notifications = (
     <StaffNotificationsPage
       accessToken={
@@ -3011,42 +4172,12 @@ function StaffDashboard({
 
 
   const reports = (
-    <section>
-
-      <Heading
-        eyebrow="Department Staff Portal / Export & Reports"
-        title="Queue export"
-        subtitle="Export only the assigned records already available to this signed-in staff account."
-      />
-
-
-      <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-6">
-
-        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
-          <Icon name="report" />
-        </div>
-
-        <h2 className="mt-4 text-[16px] font-bold">
-          Current queue CSV
-        </h2>
-
-        <p className="mt-2 max-w-xl text-[10px] leading-5 text-slate-500">
-          The export follows the current queue filters and does not request unauthorized records.
-        </p>
-
-        <button
-          type="button"
-          onClick={
-            exportCsv
-          }
-          className="mt-5 rounded-xl bg-emerald-600 px-5 py-2.5 text-[10px] font-semibold text-white"
-        >
-          Export Current Queue CSV
-        </button>
-
-      </div>
-
-    </section>
+    <StaffReportsPage
+      accessToken={accessToken}
+      filters={{ search, source, priority, status, slaOnly }}
+      filteredCount={filtered.length}
+      onExportCsv={exportCsv}
+    />
   )
 
 
@@ -3230,6 +4361,8 @@ function StaffDashboard({
         'Queries returned by the authorized staff assignment endpoint.',
 
         tickets,
+
+        'assigned queries',
       )
   }
 
@@ -3254,15 +4387,7 @@ function StaffDashboard({
     page === 'escalations'
   ) {
     content =
-      simpleTablePage(
-        'Smart Routing & SLA / Escalations',
-
-        'Escalations',
-
-        'Assigned tickets currently marked as escalated.',
-
-        escalations,
-      )
+      escalationPage
   }
 
 
@@ -3586,14 +4711,15 @@ function StaffDashboard({
                 value={
                   search
                 }
-                onChange={
-                  (event) =>
-                    setSearch(
-                      event
-                        .target
-                        .value,
-                    )
-                }
+                onChange={(event) => {
+                  setSearch(
+                    event
+                      .target
+                      .value,
+                  )
+
+                  setQueuePage(1)
+                }}
                 placeholder="Search query or student..."
                 className="h-10 w-full rounded-full border border-slate-200 bg-slate-50 pl-11 pr-4 text-[10px] outline-none focus:border-blue-400 focus:bg-white focus:ring-2 focus:ring-blue-100"
               />

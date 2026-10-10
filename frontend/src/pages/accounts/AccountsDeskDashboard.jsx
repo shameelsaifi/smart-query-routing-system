@@ -30,6 +30,8 @@ import StaffDraftReviewPage from '../../components/staff/StaffDraftReviewPage'
 
 import TicketResponseWorkspace from '../../components/staff/TicketResponseWorkspace'
 import InformationExchange from '../../components/staff/InformationExchange'
+import AccountsEscalationsPage from '../../components/accounts/AccountsEscalationsPage'
+import DeskQueueHodEscalation from '../../components/accounts/DeskQueueHodEscalation'
 import TicketAttachments from '../../components/student/TicketAttachments'
 
 
@@ -1232,6 +1234,10 @@ function TicketDetail({
 
   onInformationRequested,
 
+  loadTickets,
+
+  onEscalated,
+
   onClose,
 
 }) {
@@ -2015,6 +2021,15 @@ function TicketDetail({
               )}
 
 
+
+
+            <DeskQueueHodEscalation
+              key={number}
+              ticket={ticket}
+              accessToken={accessToken}
+              loadTickets={loadTickets}
+              onEscalated={onEscalated}
+            />
 
           </div>
 
@@ -2914,6 +2929,14 @@ function AccountsDeskDashboard({
         handleInformationRequested
 
       }
+
+      loadTickets={loadTickets}
+
+      onEscalated={(result, number) => {
+        setLocalSuccessMessage(
+          `${number} escalated to ${result.escalated_to?.full_name || 'the department HOD'}.`,
+        )
+      }}
 
       onClose={() => {
 
@@ -4135,49 +4158,17 @@ function AccountsDeskDashboard({
 
 
 
-  if (
-
-    page === 'escalations'
-
-  ) {
-
+  if (page === 'escalations') {
     content = (
-
-      <section>
-
-
-
-        <Heading
-
-          eyebrow={
-
-            `Accounts / ${config.deskName} / Escalations`
-
-          }
-
-          title="Escalated tickets"
-
-          subtitle="Assigned account-desk tickets currently marked as escalated."
-
-        />
-
-
-
-        {tablePanel(
-
-          escalated,
-
-        )}
-
-
-
-      </section>
-
+      <AccountsEscalationsPage
+        accessToken={accessToken}
+        tickets={tickets}
+        deskName={config.deskName}
+        loadTickets={loadTickets}
+        loading={loading}
+      />
     )
-
   }
-
-
 
 
 
