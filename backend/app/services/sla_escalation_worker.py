@@ -1,3 +1,4 @@
+
 import asyncio
 import logging
 from typing import Any
@@ -28,18 +29,12 @@ def _load_due_ticket(
         text(
             """
             SELECT
-                t.ticket_id::text
-                    AS ticket_id,
-
+                t.ticket_id::text AS ticket_id,
                 t.ticket_number,
-
                 t.status,
-
                 t.assigned_officer_id::text
                     AS assigned_officer_id,
-
                 t.sla_due_at,
-
                 assigned_user.department_id::text
                     AS department_id
 
@@ -58,16 +53,21 @@ def _load_due_ticket(
             )
 
               AND t.sla_due_at IS NOT NULL
-
               AND t.sla_due_at <= NOW()
 
               AND NOT EXISTS (
                   SELECT 1
                   FROM public.escalations e
                   WHERE e.ticket_id = t.ticket_id
-                    AND e.escalation_status IN (
-                        'OPEN',
-                        'ACKNOWLEDGED'
+                    AND (
+                        e.escalation_status IN (
+                            'OPEN',
+                            'ACKNOWLEDGED'
+                        )
+
+                        OR e.event_key =
+                           'sla-breach:' ||
+                           t.ticket_id::text
                     )
               )
 
@@ -107,22 +107,18 @@ def _find_hod(
             FROM public.users u
 
             WHERE u.role = 'HOD'
-
               AND u.department_id =
                   CAST(:department_id AS UUID)
-
               AND u.is_active = TRUE
 
               AND (
                   CAST(
-                      :assigned_officer_id
-                      AS UUID
+                      :assigned_officer_id AS UUID
                   ) IS NULL
 
                   OR u.user_id <>
                      CAST(
-                         :assigned_officer_id
-                         AS UUID
+                         :assigned_officer_id AS UUID
                      )
               )
 
@@ -135,9 +131,7 @@ def _find_hod(
         ),
         {
             "department_id": department_id,
-            "assigned_officer_id": (
-                assigned_officer_id
-            ),
+            "assigned_officer_id": assigned_officer_id,
         },
     ).scalar_one_or_none()
 
@@ -160,19 +154,16 @@ def _find_admin(
             FROM public.users u
 
             WHERE u.role = 'ADMIN'
-
               AND u.is_active = TRUE
 
               AND (
                   CAST(
-                      :assigned_officer_id
-                      AS UUID
+                      :assigned_officer_id AS UUID
                   ) IS NULL
 
                   OR u.user_id <>
                      CAST(
-                         :assigned_officer_id
-                         AS UUID
+                         :assigned_officer_id AS UUID
                      )
               )
 
@@ -184,9 +175,7 @@ def _find_admin(
             """
         ),
         {
-            "assigned_officer_id": (
-                assigned_officer_id
-            ),
+            "assigned_officer_id": assigned_officer_id,
         },
     ).scalar_one_or_none()
 
@@ -200,13 +189,12 @@ def process_one_due_ticket() -> bool:
     """
     Escalate one overdue unresolved ticket.
 
-    Returns:
-        True:
-            a ticket was successfully escalated.
+    Returns True when an escalation is created.
 
-        False:
-            no eligible overdue ticket exists,
-            or no valid escalation recipient exists.
+    Returns False when:
+    - No eligible overdue ticket exists.
+    - No valid escalation recipient exists.
+    - The SLA breach event already exists.
     """
 
     try:
@@ -220,18 +208,14 @@ def process_one_due_ticket() -> bool:
             ticket_number = ticket["ticket_number"]
             previous_status = ticket["status"]
 
-            assigned_officer_id = (
-                ticket["assigned_officer_id"]
-            )
+            assigned_officer_id = ticket[
+                "assigned_officer_id"
+            ]
 
-            department_id = (
-                ticket["department_id"]
-            )
+            department_id = ticket["department_id"]
 
             event_at = db.execute(
-                text(
-                    "SELECT clock_timestamp()"
-                )
+                text("SELECT clock_timestamp()")
             ).scalar_one()
 
             target_user_id = _find_hod(
@@ -248,7 +232,6 @@ def process_one_due_ticket() -> bool:
                     db,
                     assigned_officer_id,
                 )
-
                 target_role = "ADMIN"
 
             if target_user_id is None:
@@ -258,13 +241,9 @@ def process_one_due_ticket() -> bool:
                     "recipient is available.",
                     ticket_number,
                 )
-
                 return False
 
-            event_key = (
-                "sla-breach:"
-                + ticket_id
-            )
+            event_key = "sla-breach:" + ticket_id
 
             reason = (
                 "Automatic SLA breach: ticket "
@@ -278,72 +257,59 @@ def process_one_due_ticket() -> bool:
                     INSERT INTO public.escalations (
                         ticket_id,
                         department_id,
-
                         escalated_from_user_id,
                         escalated_to_user_id,
-
                         escalated_by_user_id,
                         escalated_by_service,
-
                         target_role,
                         escalation_type,
-
                         event_key,
                         reason,
-
                         escalation_status
                     )
 
                     VALUES (
                         CAST(:ticket_id AS UUID),
-
+                        CAST(:department_id AS UUID),
                         CAST(
-                            :department_id
-                            AS UUID
+                            :assigned_officer_id AS UUID
                         ),
-
-                        CAST(
-                            :assigned_officer_id
-                            AS UUID
-                        ),
-
-                        CAST(
-                            :target_user_id
-                            AS UUID
-                        ),
-
+                        CAST(:target_user_id AS UUID),
                         NULL,
                         'sla_escalation_worker',
-
                         :target_role,
                         'SLA_BREACH',
-
                         :event_key,
                         :reason,
-
                         'OPEN'
                     )
 
-                    RETURNING
-                        escalation_id::text
+                    ON CONFLICT (event_key)
+                    DO NOTHING
+
+                    RETURNING escalation_id::text
                     """
                 ),
                 {
                     "ticket_id": ticket_id,
-                    "department_id": (
-                        department_id
-                    ),
+                    "department_id": department_id,
                     "assigned_officer_id": (
                         assigned_officer_id
                     ),
-                    "target_user_id": (
-                        target_user_id
-                    ),
+                    "target_user_id": target_user_id,
                     "target_role": target_role,
                     "event_key": event_key,
                     "reason": reason,
                 },
-            ).scalar_one()
+            ).scalar_one_or_none()
+
+            if escalation_id is None:
+                logger.info(
+                    "SLA breach event already exists "
+                    "for ticket %s. Skipping.",
+                    ticket_number,
+                )
+                return False
 
             updated = db.execute(
                 text(
@@ -355,23 +321,16 @@ def process_one_due_ticket() -> bool:
                         updated_at = :event_at
 
                     WHERE ticket_id =
-                          CAST(
-                              :ticket_id
-                              AS UUID
-                          )
+                          CAST(:ticket_id AS UUID)
 
-                      AND status =
-                          :previous_status
+                      AND status = :previous_status
 
-                    RETURNING
-                        ticket_id::text
+                    RETURNING ticket_id::text
                     """
                 ),
                 {
                     "ticket_id": ticket_id,
-                    "previous_status": (
-                        previous_status
-                    ),
+                    "previous_status": previous_status,
                     "event_at": event_at,
                 },
             ).scalar_one_or_none()
@@ -390,25 +349,17 @@ def process_one_due_ticket() -> bool:
                     (
                         ticket_id,
                         changed_by_service,
-
                         previous_status,
                         new_status,
-
                         change_note,
                         changed_at
                     )
 
                     VALUES (
-                        CAST(
-                            :ticket_id
-                            AS UUID
-                        ),
-
+                        CAST(:ticket_id AS UUID),
                         'sla_escalation_worker',
-
                         :previous_status,
                         'ESCALATED',
-
                         :change_note,
                         :event_at
                     )
@@ -416,9 +367,7 @@ def process_one_due_ticket() -> bool:
                 ),
                 {
                     "ticket_id": ticket_id,
-                    "previous_status": (
-                        previous_status
-                    ),
+                    "previous_status": previous_status,
                     "change_note": (
                         "Ticket automatically "
                         "escalated after exceeding "
@@ -465,7 +414,6 @@ async def sla_escalation_worker_loop() -> None:
                     "Unexpected SLA escalation "
                     "worker iteration failure."
                 )
-
                 processed = False
 
             if processed:
