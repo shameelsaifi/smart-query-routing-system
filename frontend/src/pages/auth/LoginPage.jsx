@@ -1,13 +1,14 @@
+
 function BrandMark({ compact = false }) {
   return (
-    <div className="flex items-center gap-2.5">
+    <div className="flex min-w-0 items-center gap-2.5">
       <div className="relative h-9 w-9 shrink-0 rounded-xl bg-gradient-to-br from-blue-400 to-indigo-600 shadow-lg shadow-blue-950/20">
-        <span className="absolute left-[8px] top-[7px] h-2.5 w-2.5 rounded-full bg-white" />
+        <span className="absolute left-2 top-[7px] h-2.5 w-2.5 rounded-full bg-white" />
         <span className="absolute bottom-[7px] right-[7px] h-2 w-2 rounded-full bg-white/95" />
       </div>
 
       {!compact && (
-        <span className="text-[16px] font-bold tracking-tight text-white">
+        <span className="text-base font-bold tracking-tight text-white">
           SmartQuery
         </span>
       )}
@@ -15,11 +16,10 @@ function BrandMark({ compact = false }) {
   )
 }
 
-
 function GoogleIcon() {
   return (
     <svg
-      className="h-[18px] w-[18px] shrink-0"
+      className="h-5 w-5 shrink-0"
       viewBox="0 0 24 24"
       aria-hidden="true"
     >
@@ -43,7 +43,6 @@ function GoogleIcon() {
   )
 }
 
-
 function LockIcon({ className = 'h-4 w-4' }) {
   return (
     <svg
@@ -63,11 +62,10 @@ function LockIcon({ className = 'h-4 w-4' }) {
   )
 }
 
-
 function CheckIcon() {
   return (
     <svg
-      className="h-3 w-3 shrink-0"
+      className="h-3.5 w-3.5 shrink-0"
       fill="none"
       stroke="currentColor"
       viewBox="0 0 24 24"
@@ -82,7 +80,6 @@ function CheckIcon() {
     </svg>
   )
 }
-
 
 const workflow = [
   {
@@ -117,40 +114,32 @@ const workflow = [
   },
 ]
 
-
 const signInSteps = [
   {
     number: '1',
     title: 'Google identity',
     detail:
       'Google verifies your account and returns your authenticated identity.',
-    bubble:
-      'bg-blue-100 text-blue-700',
-    card:
-      'border-blue-100 bg-gradient-to-b from-blue-50 to-blue-50/55',
+    bubble: 'bg-blue-100 text-blue-700',
+    card: 'border-blue-100 bg-gradient-to-b from-blue-50 to-blue-50/55',
   },
   {
     number: '2',
     title: 'Access verification',
     detail:
       'Role, department, account status and permissions are checked.',
-    bubble:
-      'bg-violet-100 text-violet-700',
-    card:
-      'border-violet-100 bg-gradient-to-b from-violet-50 to-violet-50/55',
+    bubble: 'bg-violet-100 text-violet-700',
+    card: 'border-violet-100 bg-gradient-to-b from-violet-50 to-violet-50/55',
   },
   {
     number: '3',
     title: 'Role dashboard',
     detail:
       'Only your authorized workspace and permitted data are loaded.',
-    bubble:
-      'bg-emerald-100 text-emerald-700',
-    card:
-      'border-emerald-100 bg-gradient-to-b from-emerald-50 to-emerald-50/55',
+    bubble: 'bg-emerald-100 text-emerald-700',
+    card: 'border-emerald-100 bg-gradient-to-b from-emerald-50 to-emerald-50/55',
   },
 ]
-
 
 const roles = [
   ['STUDENT', 'bg-blue-50 text-blue-700'],
@@ -160,124 +149,111 @@ const roles = [
   ['ADMIN', 'bg-rose-50 text-rose-700'],
 ]
 
-
 export default function LoginPage({
   onGoogleLogin,
   loading,
   errorMessage,
 }) {
   return (
-    <main className="fixed inset-0 flex items-center justify-center overflow-hidden bg-[#edf4fb] px-5 pt-5 pb-12">
+    <main className="relative isolate flex min-h-screen w-full items-start justify-center overflow-x-hidden bg-[#edf4fb] px-3 py-4 sm:px-5 sm:py-6 lg:items-center">
+      {/* Decorative background */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute -left-32 -top-36 h-80 w-80 rounded-full bg-blue-200/30 blur-3xl"
+        className="pointer-events-none fixed -left-32 -top-36 -z-10 h-80 w-80 rounded-full bg-blue-200/30 blur-3xl"
       />
 
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute -right-36 -top-40 h-96 w-96 rounded-full bg-indigo-200/25 blur-3xl"
+        className="pointer-events-none fixed -right-36 -top-40 -z-10 h-96 w-96 rounded-full bg-indigo-200/25 blur-3xl"
       />
 
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute -bottom-40 -left-24 h-80 w-80 rounded-full bg-emerald-100/35 blur-3xl"
+        className="pointer-events-none fixed -bottom-40 -left-24 -z-10 h-80 w-80 rounded-full bg-emerald-100/35 blur-3xl"
       />
 
-
-      <div
-        className="relative grid overflow-hidden rounded-[22px] border border-white/80 bg-white shadow-[0_24px_70px_-30px_rgba(15,23,42,0.30)] lg:grid-cols-[0.93fr_1.07fr]"
-        style={{
-          width: 'min(1045px, calc(100vw - 100px))',
-          height: 'min(640px, calc(100vh - 40px))',
-          transform: 'scale(0.90)',
-          transformOrigin: 'center',
-        }}
-      >
-        {/* LEFT SIDE */}
-        <section className="relative flex min-h-0 flex-col overflow-hidden bg-[#081a37] px-8 py-6 text-white">
+      <div className="relative grid w-full max-w-[1100px] grid-cols-1 overflow-hidden rounded-2xl border border-white/80 bg-white shadow-[0_24px_70px_-30px_rgba(15,23,42,0.30)] sm:rounded-3xl lg:grid-cols-[0.93fr_1.07fr]">
+        {/* LEFT: Product introduction */}
+        <section className="relative flex min-w-0 flex-col overflow-hidden bg-[#081a37] px-5 py-6 text-white sm:px-8 sm:py-8 lg:px-8 lg:py-7">
           <div
             aria-hidden="true"
-            className="absolute -right-24 -top-24 h-60 w-60 rounded-full bg-blue-500/10"
+            className="pointer-events-none absolute -right-24 -top-24 h-60 w-60 rounded-full bg-blue-500/10"
           />
 
           <div
             aria-hidden="true"
-            className="absolute -right-28 top-44 h-60 w-60 rounded-full bg-indigo-500/10"
+            className="pointer-events-none absolute -right-28 top-44 h-60 w-60 rounded-full bg-indigo-500/10"
           />
 
-
-          <div className="relative z-10 flex items-center justify-between gap-4">
+          <div className="relative z-10 flex flex-wrap items-center justify-between gap-3">
             <BrandMark />
 
-            <span className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1.5 text-[9px] font-semibold text-emerald-200">
-              <span className="h-2 w-2 rounded-full bg-emerald-400" />
+            <span className="inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-2 text-[10px] font-semibold text-emerald-200">
+              <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
               SYSTEM OPERATIONAL
             </span>
           </div>
 
-
-          <div className="relative z-10 mt-8">
-            <p className="text-[8px] font-bold uppercase tracking-[0.19em] text-blue-300/80">
+          <div className="relative z-10 mt-7 sm:mt-9 lg:mt-8">
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-blue-300/80 sm:text-xs sm:tracking-[0.19em]">
               University Intelligent Communication Hub
             </p>
 
-            <h1 className="mt-3 max-w-[440px] text-[34px] font-semibold leading-[1.08] tracking-[-0.045em]">
+            <h1 className="mt-3 max-w-[440px] text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">
               One secure hub for every{' '}
               <span className="text-blue-400">
                 university query.
               </span>
             </h1>
 
-            <p className="mt-3 max-w-[440px] text-[10.5px] leading-[18px] text-slate-300/85">
+            <p className="mt-4 max-w-[440px] text-sm leading-6 text-slate-300/85">
               AI-assisted classification, deterministic routing,
               Gmail automation and human-approved responses with
               complete traceability.
             </p>
 
-            <div className="mt-4 flex gap-2">
-              <span className="rounded-full border border-white/10 bg-white/[0.05] px-3.5 py-1.5 text-[9px] text-slate-200">
-                ▣ &nbsp; Web Portal
+            <div className="mt-5 flex flex-wrap gap-2">
+              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-200">
+                Web Portal
               </span>
 
-              <span className="rounded-full border border-white/10 bg-white/[0.05] px-3.5 py-1.5 text-[9px] text-slate-200">
-                ✉ &nbsp; University Gmail
+              <span className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-200">
+                University Gmail
               </span>
             </div>
           </div>
 
-
-          <div className="relative z-10 mt-6">
-            <p className="mb-3 text-[10px] font-semibold">
+          {/* Workflow */}
+          <div className="relative z-10 mt-8 sm:mt-9 lg:mt-7">
+            <p className="mb-4 text-sm font-semibold">
               How SmartQuery works
             </p>
 
             <div className="relative">
-              <div className="pointer-events-none absolute left-[10%] right-[10%] top-[14px] z-0 grid grid-cols-4">
-                <span className="h-[2px] bg-blue-500" />
-                <span className="h-[2px] bg-cyan-500" />
-                <span className="h-[2px] bg-violet-500" />
-                <span className="h-[2px] bg-amber-500" />
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute left-[10%] right-[10%] top-4 z-0 grid grid-cols-4"
+              >
+                <span className="h-0.5 bg-blue-500" />
+                <span className="h-0.5 bg-cyan-500" />
+                <span className="h-0.5 bg-violet-500" />
+                <span className="h-0.5 bg-amber-500" />
               </div>
 
-              <div className="relative z-10 grid grid-cols-5">
+              <div className="relative z-10 grid grid-cols-5 gap-1">
                 {workflow.map((item) => (
-                  <div
-                    key={item.number}
-                    className="text-center"
-                  >
+                  <div key={item.number} className="min-w-0 text-center">
                     <div
-                      className={
-                        `mx-auto flex h-7 w-7 items-center justify-center rounded-full text-[8px] font-bold text-white ${item.circle}`
-                      }
+                      className={`mx-auto flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold text-white ${item.circle}`}
                     >
                       {item.number}
                     </div>
 
-                    <p className="mt-2 text-[8px] font-semibold text-white">
+                    <p className="mt-2 break-words text-xs font-semibold text-white sm:text-sm">
                       {item.title}
                     </p>
 
-                    <p className="mt-0.5 text-[7px] text-slate-400">
+                    <p className="mt-1 break-words text-[10px] leading-4 text-slate-400 sm:text-xs">
                       {item.detail}
                     </p>
                   </div>
@@ -286,174 +262,163 @@ export default function LoginPage({
             </div>
           </div>
 
-
-          <div className="relative z-10 mt-7 rounded-2xl border border-cyan-300/20 bg-gradient-to-r from-cyan-950/70 via-sky-950/60 to-blue-950/70 p-3.5">
-            <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-200">
-                <LockIcon />
+          {/* Security information */}
+          <div className="relative z-10 mt-7 rounded-2xl border border-cyan-300/20 bg-gradient-to-r from-cyan-950/70 via-sky-950/60 to-blue-950/70 p-4 sm:mt-8 lg:mt-7">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-200">
+                <LockIcon className="h-5 w-5" />
               </div>
 
-              <div>
-                <p className="text-[11px] font-semibold text-cyan-50">
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-cyan-50">
                   Secure role-based access
                 </p>
 
-                <p className="mt-0.5 text-[8px] leading-4 text-cyan-100/65">
+                <p className="mt-1 text-xs leading-5 text-cyan-100/75">
                   Your role, department and account status are
                   verified after sign-in.
                 </p>
               </div>
             </div>
 
-            <div className="mt-3 grid grid-cols-3 gap-2 border-t border-cyan-300/10 pt-3">
-              <div className="flex items-center gap-1.5">
-                <span className="text-emerald-300">
-                  <CheckIcon />
-                </span>
+            <div className="mt-4 grid grid-cols-1 gap-3 border-t border-cyan-300/10 pt-4 sm:grid-cols-3 sm:gap-2">
+              {[
+                'No password stored',
+                'JWT verification',
+                'Activity audited',
+              ].map((item) => (
+                <div key={item} className="flex items-center gap-2">
+                  <span className="text-emerald-300">
+                    <CheckIcon />
+                  </span>
 
-                <span className="text-[7px] leading-3 text-cyan-50/80">
-                  No password stored
-                </span>
-              </div>
-
-              <div className="flex items-center gap-1.5">
-                <span className="text-emerald-300">
-                  <CheckIcon />
-                </span>
-
-                <span className="text-[7px] leading-3 text-cyan-50/80">
-                  JWT verification
-                </span>
-              </div>
-
-              <div className="flex items-center gap-1.5">
-                <span className="text-emerald-300">
-                  <CheckIcon />
-                </span>
-
-                <span className="text-[7px] leading-3 text-cyan-50/80">
-                  Activity audited
-                </span>
-              </div>
+                  <span className="text-xs leading-5 text-cyan-50/85">
+                    {item}
+                  </span>
+                </div>
+              ))}
             </div>
           </div>
+
+          <p className="relative z-10 mt-6 text-xs leading-5 text-slate-400">
+            A centralized communication experience for university
+            students, instructors and administrative teams.
+          </p>
         </section>
 
-
-        {/* RIGHT SIDE */}
-        <section className="flex min-h-0 flex-col overflow-hidden bg-gradient-to-br from-white via-white to-blue-50/30 px-8 py-6">
+        {/* RIGHT: Google sign-in */}
+        <section className="flex min-w-0 flex-col bg-gradient-to-br from-white via-white to-blue-50/30 px-5 py-6 sm:px-8 sm:py-8 lg:px-10 lg:py-8">
           <div>
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1.5 text-[8px] font-bold uppercase tracking-wide text-blue-700">
-              <LockIcon className="h-3 w-3" />
+            <span className="inline-flex max-w-full items-center gap-2 rounded-full bg-blue-50 px-3 py-2 text-[10px] font-bold uppercase tracking-wide text-blue-700 sm:text-xs">
+              <LockIcon className="h-4 w-4 shrink-0" />
               Authorized university accounts only
             </span>
           </div>
 
-
-          <div className="my-auto py-2">
+          <div className="my-7 sm:my-9 lg:my-auto lg:py-8">
             <BrandMark compact />
 
-            <h2 className="mt-3 text-[26px] font-bold tracking-[-0.035em] text-slate-900">
+            <h2 className="mt-4 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
               Welcome back
             </h2>
 
-            <p className="mt-1.5 text-[9.5px] text-slate-500">
+            <p className="mt-3 max-w-md text-sm leading-6 text-slate-600">
               Sign in with your authorized Google university
               account to continue.
             </p>
 
-
             {errorMessage && (
               <div
                 role="alert"
-                className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[9px] text-rose-700"
+                className="mt-5 break-words rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-5 text-rose-700"
               >
                 {errorMessage}
               </div>
             )}
 
-
             <button
               type="button"
               onClick={onGoogleLogin}
               disabled={loading}
-              className="mt-4 flex min-h-[42px] w-full items-center rounded-xl border border-slate-300 bg-white px-4 shadow-sm transition hover:border-blue-300 hover:bg-blue-50/30 disabled:opacity-60"
+              aria-busy={loading}
+              className="mt-6 flex min-h-12 w-full items-center gap-3 rounded-xl border border-slate-300 bg-white px-4 py-3 shadow-sm transition hover:border-blue-300 hover:bg-blue-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <GoogleIcon />
 
-              <span className="flex-1 text-center text-[10.5px] font-semibold text-slate-800">
+              <span className="min-w-0 flex-1 text-center text-sm font-semibold text-slate-800">
                 {loading
                   ? 'Connecting to Google...'
                   : 'Continue with Google'}
               </span>
 
-              <span className="text-lg leading-none text-slate-400">
-                ›
+              <span
+                aria-hidden="true"
+                className="shrink-0 text-xl leading-none text-slate-400"
+              >
+                →
               </span>
             </button>
 
-
-            <div className="mt-3 flex gap-3 rounded-xl border border-blue-100 bg-blue-50/80 p-3">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-600">
-                <LockIcon className="h-4 w-4" />
+            <div className="mt-4 flex items-start gap-3 rounded-xl border border-blue-100 bg-blue-50/80 p-4">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-600">
+                <LockIcon className="h-5 w-5" />
               </div>
 
-              <div>
-                <p className="text-[9.5px] font-bold text-blue-700">
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-blue-700">
                   Google OAuth 2.0
                 </p>
 
-                <p className="mt-0.5 text-[7.5px] leading-4 text-slate-500">
-                  Authentication happens on Google. SmartQuery does
-                  not collect or store your password. FastAPI verifies
-                  the session before any protected dashboard opens.
+                <p className="mt-1 text-xs leading-5 text-slate-600">
+                  Authentication happens on Google. SmartQuery
+                  does not collect your Google password. FastAPI
+                  verifies the session before protected dashboards
+                  open.
                 </p>
               </div>
             </div>
 
+            {/* Sign-in steps */}
+            <div className="mt-7">
+              <p className="text-sm font-semibold text-slate-800">
+                Secure sign-in process
+              </p>
 
-            <p className="mt-4 text-[10.5px] font-semibold text-slate-800">
-              Secure sign-in process
-            </p>
-
-            <div className="mt-2 grid grid-cols-3 gap-2">
-              {signInSteps.map((step) => (
-                <div
-                  key={step.number}
-                  className={
-                    `rounded-xl border p-2.5 ${step.card}`
-                  }
-                >
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                {signInSteps.map((step) => (
                   <div
-                    className={
-                      `flex h-6 w-6 items-center justify-center rounded-full text-[8px] font-bold ${step.bubble}`
-                    }
+                    key={step.number}
+                    className={`min-w-0 rounded-xl border p-3 sm:p-3 ${step.card}`}
                   >
-                    {step.number}
+                    <div
+                      className={`flex h-8 w-8 items-center justify-center rounded-full text-xs font-bold ${step.bubble}`}
+                    >
+                      {step.number}
+                    </div>
+
+                    <p className="mt-3 text-sm font-semibold leading-5 text-slate-800">
+                      {step.title}
+                    </p>
+
+                    <p className="mt-2 text-xs leading-5 text-slate-600">
+                      {step.detail}
+                    </p>
                   </div>
-
-                  <p className="mt-2 text-[8.5px] font-semibold text-slate-800">
-                    {step.title}
-                  </p>
-
-                  <p className="mt-1 text-[7px] leading-3.5 text-slate-500">
-                    {step.detail}
-                  </p>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
 
-
-            <div className="mt-4 border-t border-slate-200 pt-3">
-              <p className="text-[8px] font-semibold text-slate-500">
+            {/* Supported roles */}
+            <div className="mt-7 border-t border-slate-200 pt-5">
+              <p className="text-xs font-semibold text-slate-600">
                 Supported role-based access
               </p>
 
-              <div className="mt-2 flex flex-wrap gap-1.5">
+              <div className="mt-3 flex flex-wrap gap-2">
                 {roles.map(([label, color]) => (
                   <span
                     key={label}
-                    className={`rounded-full px-2.5 py-1 text-[7px] font-bold ${color}`}
+                    className={`rounded-full px-3 py-1.5 text-[11px] font-bold ${color}`}
                   >
                     {label}
                   </span>
@@ -462,19 +427,21 @@ export default function LoginPage({
             </div>
           </div>
 
-
-          <footer className="flex items-center justify-between gap-4 border-t border-slate-200 pt-3">
-            <div className="flex items-center gap-1.5 text-[7px] text-slate-500">
-              <span className="text-emerald-500">
+          <footer className="flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+            <div className="flex items-start gap-2 text-xs leading-5 text-slate-500">
+              <span className="mt-0.5 text-emerald-500">
                 <CheckIcon />
               </span>
 
-              Protected by secure session, RBAC and audit logging.
+              <span>
+                Protected by secure session, RBAC and audit logging.
+              </span>
             </div>
 
             <a
-              href="#help"
-              className="text-[7px] font-medium text-blue-600 transition hover:text-blue-800"
+              href="mailto:"
+              aria-label="Contact university IT support by email"
+              className="text-xs font-medium leading-5 text-blue-600 transition hover:text-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             >
               Need help? Contact university IT support →
             </a>

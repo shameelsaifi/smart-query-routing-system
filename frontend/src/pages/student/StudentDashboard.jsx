@@ -852,6 +852,8 @@ function StudentDashboard({
   accessToken,
   onLogout,
 }) {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+
   const location =
     useLocation()
 
@@ -2295,7 +2297,7 @@ function StudentDashboard({
 
 
   return (
-    <div className="fixed inset-0 flex overflow-hidden bg-[#eef5fb] font-sans text-slate-800">
+    <div className="fixed inset-0 flex min-w-0 overflow-hidden bg-[#eef5fb] font-sans text-slate-800">
 
       {/* =====================================================
           SIDEBAR
@@ -2513,9 +2515,23 @@ function StudentDashboard({
 
         {/* TOP HEADER */}
 
-        <header className="z-30 flex h-[72px] shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white px-5 lg:px-7">
+        <header className="z-30 flex min-h-[64px] shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-3 sm:h-[72px] sm:gap-4 sm:px-5 sm:py-0 lg:px-7">
 
-          <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              type="button"
+              aria-label="Open student navigation menu"
+              aria-expanded={mobileMenuOpen}
+              aria-controls="student-mobile-drawer"
+              onClick={() => setMobileMenuOpen(true)}
+              className="group flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-100 lg:hidden"
+            >
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                <path d="M4 7h16M4 12h16M4 17h16" />
+              </svg>
+            </button>
+
+            <div className="min-w-0">
 
             <p className="truncate text-[17px] font-bold text-slate-900">
               Student Portal
@@ -2525,10 +2541,11 @@ function StudentDashboard({
               Smart Query Routing & Email Automation
             </p>
 
+            </div>
           </div>
 
 
-          <div className="flex min-w-0 items-center gap-3">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
 
             <form
               onSubmit={
@@ -2611,6 +2628,82 @@ function StudentDashboard({
 
         </header>
 
+        {/* Premium mobile navigation drawer */}
+        {mobileMenuOpen && (
+          <div className="fixed inset-0 z-[60] lg:hidden">
+            <button
+              type="button"
+              aria-label="Close navigation menu"
+              onClick={() => setMobileMenuOpen(false)}
+              className="absolute inset-0 h-full w-full cursor-default bg-slate-950/55 backdrop-blur-[2px]"
+            />
+
+            <aside
+              id="student-mobile-drawer"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Student portal navigation"
+              className="absolute inset-y-0 left-0 flex w-[min(86vw,320px)] flex-col overflow-y-auto border-r border-white/10 bg-[#081a37] px-4 pb-5 pt-4 text-white shadow-2xl shadow-slate-950/30"
+            >
+              <div className="flex items-center justify-between border-b border-white/10 px-1 pb-5">
+                <div>
+                  <Brand />
+                  <p className="mt-3 pl-1 text-[10px] font-bold uppercase tracking-[0.2em] text-blue-200/70">Student Portal</p>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Close navigation menu"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-white/[0.06] text-slate-300 transition hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+                >
+                  <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+                </button>
+              </div>
+
+              <div className="mt-5 rounded-2xl border border-blue-300/15 bg-gradient-to-br from-blue-500/15 to-indigo-500/10 p-3.5">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-400/15 text-sm font-bold text-blue-200 ring-1 ring-blue-300/20">
+                    {initials || 'ST'}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-white">{profile?.full_name || 'Student'}</p>
+                    <p className="mt-0.5 truncate text-[11px] text-slate-400">{profile?.email || 'Student account'}</p>
+                  </div>
+                </div>
+              </div>
+
+              <nav aria-label="Student portal navigation" className="mt-5 space-y-1.5">
+                <p className="mb-2 px-3 text-[9px] font-bold uppercase tracking-[0.18em] text-slate-500">Workspace</p>
+                <SidebarItem icon="home" label="Overview" active={!selectedTicket && activeTab === 'overview'} onClick={() => { setMobileMenuOpen(false); openOverview() }} />
+                <SidebarItem icon="plus" label="Submit Query" active={!selectedTicket && activeTab === 'new_query'} onClick={() => { setMobileMenuOpen(false); openSubmit() }} />
+                <SidebarItem icon="ticket" label="My Queries" active={!selectedTicket && activeTab === 'queries'} onClick={() => { setMobileMenuOpen(false); openQueries() }} />
+
+                <p className="mb-2 mt-5 px-3 pt-2 text-[9px] font-bold uppercase tracking-[0.18em] text-slate-500">Smart Routing & AI</p>
+                <SidebarItem icon="clock" label="Track Routing" active={!selectedTicket && activeTab === 'tracking'} onClick={() => { setMobileMenuOpen(false); openTracking() }} />
+                <SidebarItem icon="ai" label="AI Guidance Assistant" active={!selectedTicket && activeTab === 'guidance'} onClick={() => { setMobileMenuOpen(false); openGuidance() }} />
+                <SidebarItem icon="bell" label="Notifications" badge={overview?.unreadCount || 0} active={!selectedTicket && activeTab === 'notifications'} onClick={() => { setMobileMenuOpen(false); openNotifications() }} />
+                <SidebarItem icon="history" label="Query History" active={!selectedTicket && activeTab === 'history'} onClick={() => { setMobileMenuOpen(false); openHistory() }} />
+                <SidebarItem icon="user" label="Profile & Privacy" active={!selectedTicket && activeTab === 'profile'} onClick={() => { setMobileMenuOpen(false); openProfile() }} />
+              </nav>
+
+              <div className="mt-auto pt-6">
+                <div className="rounded-2xl border border-emerald-300/15 bg-emerald-400/[0.06] p-3.5">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-slate-100"><span className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_0_4px_rgba(52,211,153,0.1)]" /> All services operational</div>
+                  <p className="mt-2 pl-4 text-[11px] leading-5 text-slate-400">Your student support workspace is ready.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => { setMobileMenuOpen(false); handleLogout() }}
+                  disabled={busy}
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.05] px-4 py-3 text-sm font-semibold text-slate-200 transition hover:border-rose-300/20 hover:bg-rose-400/10 hover:text-rose-200 disabled:opacity-50"
+                >
+                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 17l5-5-5-5M15 12H3"/><path d="M12 3h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6"/></svg>
+                  Sign out
+                </button>
+              </div>
+            </aside>
+          </div>
+        )}
 
         {/* =====================================================
             MAIN - IMPORTANT: X OVERFLOW HIDDEN
@@ -2629,7 +2722,7 @@ function StudentDashboard({
           />
 
 
-          <div className="relative z-10 mx-auto min-w-0 w-full max-w-[1500px] p-4 md:p-6">
+          <div className="relative z-10 mx-auto min-w-0 w-full max-w-[1500px] p-3 sm:p-4 md:p-6">
 
             {/* =================================================
                 TICKET DETAILS / DRAFT
@@ -2716,7 +2809,7 @@ function StudentDashboard({
                             Home / Overview
                           </p>
 
-                          <h1 className="mt-1 text-3xl font-bold tracking-[-0.035em] text-slate-900">
+                          <h1 className="mt-1 break-words text-2xl font-bold tracking-[-0.035em] text-slate-900 sm:text-3xl">
                             Welcome back, {firstName}.
                           </h1>
 
@@ -2977,9 +3070,9 @@ function StudentDashboard({
 
                           {/* NO HORIZONTAL SCROLL HERE */}
 
-                          <div className="mt-3 w-full min-w-0 overflow-hidden">
+                          <div className="mt-3 w-full min-w-0 overflow-x-auto overscroll-x-contain">
 
-                            <table className="w-full table-fixed text-left">
+                            <table className="w-full min-w-[620px] table-fixed text-left">
 
                               <colgroup>
                                 <col style={{ width: '13%' }} />
@@ -3388,7 +3481,7 @@ function StudentDashboard({
                               Queries / Track Routing
                             </p>
 
-                            <h1 className="mt-1 text-3xl font-bold tracking-[-0.035em] text-slate-900">
+                            <h1 className="mt-1 break-words text-2xl font-bold tracking-[-0.035em] text-slate-900 sm:text-3xl">
                               Track routing
                             </h1>
 
@@ -3645,7 +3738,7 @@ function StudentDashboard({
                                 Student Portal / Notifications
                               </p>
 
-                              <h1 className="mt-1 text-3xl font-bold tracking-[-0.035em] text-slate-900">
+                              <h1 className="mt-1 break-words text-2xl font-bold tracking-[-0.035em] text-slate-900 sm:text-3xl">
                                 Notifications
                               </h1>
 
@@ -3839,7 +3932,7 @@ function StudentDashboard({
                               Student Portal / Profile & Privacy
                             </p>
 
-                            <h1 className="mt-1 text-3xl font-bold tracking-[-0.035em] text-slate-900">
+                            <h1 className="mt-1 break-words text-2xl font-bold tracking-[-0.035em] text-slate-900 sm:text-3xl">
                               Profile & privacy
                             </h1>
 
@@ -3849,7 +3942,7 @@ function StudentDashboard({
                             </p>
 
 
-                            <div className="mt-5 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+                            <div className="mt-5 grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
 
                               <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-[0_10px_30px_-25px_rgba(15,23,42,0.3)]">
 
@@ -4032,7 +4125,7 @@ function StudentDashboard({
                                     }
                                   </p>
 
-                                  <h1 className="mt-1 text-3xl font-bold tracking-[-0.035em] text-slate-900">
+                                  <h1 className="mt-1 break-words text-2xl font-bold tracking-[-0.035em] text-slate-900 sm:text-3xl">
                                     {
                                       activeTab
                                         === 'guidance'
@@ -4704,7 +4797,7 @@ function StudentDashboard({
                                     }
                                   </p>
 
-                                  <h1 className="mt-1 text-2xl font-bold text-slate-900">
+                                  <h1 className="mt-1 break-words text-xl font-bold text-slate-900 sm:text-2xl">
                                     {
                                       activeTab
                                         === 'history'
@@ -4982,9 +5075,9 @@ function StudentDashboard({
 
                                           {/* NO HORIZONTAL SCROLL */}
 
-                                          <div className="w-full min-w-0 overflow-hidden px-5 pb-5 pt-3">
+                                          <div className="w-full min-w-0 overflow-x-auto overscroll-x-contain px-3 pb-5 pt-3 sm:px-5">
 
-                                            <table className="w-full table-fixed">
+                                            <table className="w-full min-w-[680px] table-fixed">
 
                                               <colgroup>
                                                 <col style={{ width: '28%' }} />
