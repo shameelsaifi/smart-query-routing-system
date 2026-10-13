@@ -1162,6 +1162,12 @@ export default function InstructorDashboard({
   const navigate = useNavigate()
   const location = useLocation()
   const contentRef = useRef(null)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+
+  const navigateToInstructorPage = (page) => {
+    navigate(INSTRUCTOR_PATHS[page])
+    setMobileMenuOpen(false)
+  }
 
   const normalizedPath =
     location.pathname.replace(/\/+$/, '') || '/instructor'
@@ -1796,9 +1802,9 @@ export default function InstructorDashboard({
   }
 
   return (
-    <div className="flex h-screen min-h-0 w-full overflow-hidden bg-[#eef5fc] text-slate-900">
+    <div className="relative flex h-screen min-h-0 w-full overflow-hidden bg-[#eef5fc] text-slate-900">
       <aside
-        className="flex w-[244px] shrink-0 flex-col overflow-y-auto bg-[#0b1f3a] px-4 py-5 text-white [&::-webkit-scrollbar]:hidden"
+        className="hidden w-[244px] shrink-0 flex-col overflow-y-auto bg-[#0b1f3a] px-4 py-5 text-white [&::-webkit-scrollbar]:hidden lg:flex"
         style={{
           scrollbarWidth: 'none',
           msOverflowStyle: 'none',
@@ -1827,7 +1833,7 @@ export default function InstructorDashboard({
               icon={item.icon}
               label={item.label}
               badge={item.badge}
-              onClick={() => navigate(INSTRUCTOR_PATHS[item.page])}
+              onClick={() => navigateToInstructorPage(item.page)}
             />
           ))}
         </nav>
@@ -1844,7 +1850,7 @@ export default function InstructorDashboard({
               icon={item.icon}
               label={item.label}
               badge={item.badge}
-              onClick={() => navigate(INSTRUCTOR_PATHS[item.page])}
+              onClick={() => navigateToInstructorPage(item.page)}
             />
           ))}
         </nav>
@@ -1872,18 +1878,122 @@ export default function InstructorDashboard({
         </div>
       </aside>
 
+      {mobileMenuOpen && (
+        <button
+          type="button"
+          aria-label="Close navigation menu"
+          onClick={() => setMobileMenuOpen(false)}
+          className="fixed inset-0 z-[80] bg-slate-950/50 backdrop-blur-[2px] lg:hidden"
+        />
+      )}
+
+      <aside
+        aria-label="Instructor mobile navigation"
+        className={`fixed inset-y-0 left-0 z-[90] flex w-[min(84vw,300px)] flex-col overflow-y-auto bg-[#0b1f3a] px-4 py-5 text-white shadow-2xl transition-transform duration-300 ease-out lg:hidden ${
+          mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+        aria-hidden={!mobileMenuOpen}
+      >
+        <div className="flex items-center justify-between gap-3 px-2">
+          <div className="flex items-center gap-3">
+            <div className="relative h-10 w-10 shrink-0 rounded-xl bg-gradient-to-br from-blue-400 to-indigo-600 shadow-lg">
+              <span className="absolute left-[10px] top-[9px] h-3 w-3 rounded-full bg-white" />
+              <span className="absolute bottom-[8px] right-[8px] h-2.5 w-2.5 rounded-full bg-white/95" />
+            </div>
+            <span className="text-[17px] font-bold">SmartQuery</span>
+          </div>
+          <button
+            type="button"
+            aria-label="Close navigation menu"
+            onClick={() => setMobileMenuOpen(false)}
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-300 hover:bg-white/10 hover:text-white"
+          >
+            <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="m6 6 12 12M18 6 6 18" />
+            </svg>
+          </button>
+        </div>
+
+        <p className="mt-6 px-2 text-[9px] font-semibold uppercase tracking-[0.16em] text-blue-300/65">
+          Instructor Portal
+        </p>
+        <nav className="mt-3 space-y-1">
+          {sidebarTop.map((item) => (
+            <SidebarButton
+              key={item.page}
+              active={activePage === item.page}
+              icon={item.icon}
+              label={item.label}
+              badge={item.badge}
+              onClick={() => navigateToInstructorPage(item.page)}
+            />
+          ))}
+        </nav>
+
+        <p className="mt-5 px-2 text-[9px] font-semibold uppercase tracking-[0.16em] text-blue-300/50">
+          Routing &amp; SLA
+        </p>
+        <nav className="mt-2 space-y-1">
+          {sidebarBottom.map((item) => (
+            <SidebarButton
+              key={item.page}
+              active={activePage === item.page}
+              icon={item.icon}
+              label={item.label}
+              badge={item.badge}
+              onClick={() => navigateToInstructorPage(item.page)}
+            />
+          ))}
+        </nav>
+
+        <div className="mt-auto rounded-2xl border border-blue-300/15 bg-white/[0.04] p-4">
+          <div className="flex items-center gap-2">
+            <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+            <p className="text-[11px] font-semibold">System operational</p>
+          </div>
+          <div className="mt-3 space-y-2 border-t border-white/10 pt-3 text-[10px] text-slate-400">
+            {['Gemini drafts', 'Gmail delivery', 'SLA monitor'].map((label, index) => (
+              <div key={label} className="flex justify-between">
+                <span>{label}</span>
+                <span className="text-emerald-400">{index === 2 ? 'Active' : 'Online'}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </aside>
+
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="flex h-[72px] shrink-0 items-center justify-between border-b border-slate-200 bg-white px-6">
-          <div>
-            <h1 className="text-[17px] font-bold text-slate-900">
+        <header className="flex min-h-[68px] shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-3 py-3 sm:px-5 lg:h-[72px] lg:px-6 lg:py-0">
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              type="button"
+              aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+              aria-expanded={mobileMenuOpen}
+              onClick={() => setMobileMenuOpen((open) => !open)}
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 lg:hidden"
+            >
+              {mobileMenuOpen ? (
+                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="m6 6 12 12M18 6 6 18" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              )}
+            </button>
+            <div className="min-w-0">
+            <h1 className="truncate text-[15px] font-bold text-slate-900 sm:text-[17px]">
               Instructor Portal
             </h1>
-            <p className="mt-0.5 text-[10px] text-slate-500">
+            <p className="mt-0.5 hidden text-[10px] text-slate-500 sm:block">
               Course Query Management &amp; Human Review
             </p>
+            </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
             <label className="hidden w-[290px] items-center gap-3 rounded-full border border-slate-200 bg-slate-50 px-4 py-2.5 lg:flex">
               <Icon name="search" className="h-4 w-4 text-slate-400"/>
               <input
@@ -1929,7 +2039,7 @@ export default function InstructorDashboard({
           ref={contentRef}
           className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden"
         >
-          <div className="mx-auto w-full max-w-[1500px] px-5 py-4">
+          <div className="mx-auto w-full max-w-[1500px] px-3 py-4 sm:px-5 sm:py-5 lg:px-6">
             {errorMessage && (
               <p className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-[10px] text-rose-700">
                 {errorMessage}

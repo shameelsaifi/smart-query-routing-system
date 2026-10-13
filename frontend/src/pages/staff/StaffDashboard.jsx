@@ -699,7 +699,7 @@ function Heading({
           {eyebrow}
         </p>
 
-        <h1 className="mt-1 text-3xl font-bold tracking-[-0.035em] text-slate-900">
+        <h1 className="mt-1 break-words text-2xl font-bold tracking-[-0.035em] text-slate-900 sm:text-3xl">
           {title}
         </h1>
 
@@ -725,9 +725,9 @@ function QueueTable({
   renderExpanded = null,
 }) {
   return (
-    <div className="w-full min-w-0 overflow-hidden">
+    <div className="w-full min-w-0 overflow-x-auto rounded-xl">
 
-      <table className="w-full table-fixed text-left">
+      <table className="w-full min-w-[980px] table-fixed text-left">
 
         <colgroup>
           <col className="w-[8%]" />
@@ -1217,7 +1217,7 @@ function TicketPanel({
   return (
     <section className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white">
 
-      <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-5 py-4">
+      <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-3 py-4 sm:px-5">
 
         <div>
 
@@ -1245,7 +1245,7 @@ function TicketPanel({
       </div>
 
 
-      <div className="grid gap-4 p-5 xl:grid-cols-[1.2fr_0.8fr]">
+      <div className="grid min-w-0 gap-4 p-3 sm:p-5 xl:grid-cols-[1.2fr_0.8fr]">
 
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
 
@@ -1671,7 +1671,7 @@ function TicketPanel({
 
 
       {responseOpen && (
-        <div className="px-5 pb-5">
+        <div className="px-3 pb-4 sm:px-5 sm:pb-5">
 
           <TicketResponseWorkspace
             accessToken={
@@ -1692,7 +1692,7 @@ function TicketPanel({
 
 
       {infoOpen && (
-        <div className="px-5 pb-5">
+        <div className="px-3 pb-4 sm:px-5 sm:pb-5">
 
           <InformationRequestWorkspace
             accessToken={
@@ -1821,6 +1821,11 @@ function StaffDashboard({
     localMessage,
     setLocalMessage,
   ] = useState('')
+
+  const [
+    mobileMenuOpen,
+    setMobileMenuOpen,
+  ] = useState(false)
 
   const [
     now,
@@ -2109,6 +2114,7 @@ function StaffDashboard({
   const go = (
     target,
   ) => {
+    setMobileMenuOpen(false)
     setSelected(
       null,
     )
@@ -4673,9 +4679,59 @@ function StaffDashboard({
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
 
-        <header className="z-30 flex h-[72px] shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white px-5 lg:px-7">
+        {mobileMenuOpen && (
+          <div className="fixed inset-0 z-40 lg:hidden">
+            <button
+              type="button"
+              aria-label="Close navigation menu"
+              onClick={() => setMobileMenuOpen(false)}
+              className="absolute inset-0 bg-slate-950/50"
+            />
+            <nav
+              aria-label="Mobile department staff portal"
+              className="absolute inset-y-0 left-0 w-[min(86vw,300px)] overflow-y-auto bg-[#071a35] px-4 py-5 text-white shadow-2xl"
+            >
+              <div className="mb-6 flex items-center justify-between gap-3">
+                <Brand />
+                <button
+                  type="button"
+                  onClick={() => setMobileMenuOpen(false)}
+                  aria-label="Close navigation menu"
+                  className="rounded-lg px-3 py-2 text-xl text-slate-300 hover:bg-white/10"
+                >×</button>
+              </div>
+              <p className="mb-3 px-2 text-[9px] font-bold uppercase tracking-[0.16em] text-slate-500">Department Staff Portal</p>
+              <div className="space-y-1">
+                <NavButton icon="home" label="Overview" active={page === 'overview'} onClick={() => go('overview')} />
+                <NavButton icon="queue" label="Department Queue" badge={openTickets.length} active={page === 'queue'} onClick={() => go('queue')} />
+                <NavButton icon="draft" label="Draft Responses" badge={drafts.length} active={page === 'drafts'} onClick={() => go('drafts')} />
+                <NavButton icon="assignment" label="Assignments" active={page === 'assignments'} onClick={() => go('assignments')} />
+                <div className="mx-2 my-3 border-t border-white/10" />
+                <NavButton icon="workload" label="Staff Workload" active={page === 'workload'} onClick={() => go('workload')} />
+                <NavButton icon="routing" label="Routing Monitor" note="STATUS" active={page === 'routing'} onClick={() => go('routing')} />
+                <NavButton icon="alert" label="Escalations" badge={escalations.length} active={page === 'escalations'} onClick={() => go('escalations')} />
+                <NavButton icon="bell" label="Notifications" active={page === 'notifications'} onClick={() => go('notifications')} />
+                <NavButton icon="report" label="Export & Reports" active={page === 'reports'} onClick={() => go('reports')} />
+                <NavButton icon="user" label="Profile" active={page === 'profile'} onClick={() => go('profile')} />
+              </div>
+              <button type="button" onClick={onLogout} className="mt-6 w-full rounded-xl border border-white/15 px-4 py-3 text-left text-sm font-semibold text-slate-200 hover:bg-white/10">Sign Out</button>
+            </nav>
+          </div>
+        )}
 
-          <div className="min-w-0">
+        <header className="z-30 flex min-h-[64px] shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white px-3 py-3 sm:h-[72px] sm:px-5 lg:px-7">
+
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen((open) => !open)}
+            aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+            aria-expanded={mobileMenuOpen}
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 lg:hidden"
+          >
+            <span className="text-xl leading-none">{mobileMenuOpen ? '×' : '☰'}</span>
+          </button>
+
+          <div className="min-w-0 flex-1">
 
             <p className="truncate text-[17px] font-bold text-slate-900">
               Department Staff Portal
@@ -4781,7 +4837,7 @@ function StaffDashboard({
           />
 
 
-          <div className="relative z-10 mx-auto w-full max-w-[1500px] p-4 md:p-6">
+          <div className="relative z-10 mx-auto w-full max-w-[1500px] p-3 sm:p-4 md:p-6">
 
             {errorMessage && (
               <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-[10px] text-rose-700">
