@@ -377,7 +377,7 @@ function PageHeading({
           {eyebrow}
         </p>
 
-        <h1 className="mt-1 text-3xl font-bold tracking-[-0.035em] text-slate-900">
+        <h1 className="mt-1 break-words text-2xl font-bold tracking-[-0.035em] text-slate-900 sm:text-3xl">
           {title}
         </h1>
 
@@ -784,7 +784,7 @@ function OverviewPage({
       </div>
 
       <div className="mt-4 grid items-start gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-        <section className="rounded-2xl border border-slate-200 bg-white p-5">
+        <section className="rounded-2xl border border-slate-200 bg-white p-3 sm:p-5">
           <h2 className="text-[15px] font-bold">
             Department load
           </h2>
@@ -870,7 +870,7 @@ function OverviewPage({
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5">
+        <section className="rounded-2xl border border-slate-200 bg-white p-3 sm:p-5">
           <h2 className="text-[15px] font-bold">
             Administrative actions
           </h2>
@@ -1435,7 +1435,7 @@ function QueriesPage({
 
       <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white">
         <div className="flex flex-wrap gap-3 border-b border-slate-100 p-4">
-          <div className="relative min-w-[230px] flex-1">
+          <div className="relative min-w-full flex-1 sm:min-w-[230px]">
             <Icon
               name="search"
               className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
@@ -1563,8 +1563,8 @@ function QueriesPage({
           )}
         </div>
 
-        <div className="w-full overflow-hidden">
-          <table className="w-full table-fixed">
+        <div className="w-full overflow-x-auto">
+          <table className="w-full min-w-[1050px] table-fixed">
             <colgroup>
               <col className="w-[20%]" />
               <col className="w-[14%]" />
@@ -3185,7 +3185,7 @@ function UserManagementPage({
         )}
 
         <div className="flex flex-wrap gap-3 border-b border-slate-100 p-4">
-          <div className="relative min-w-[230px] flex-1">
+          <div className="relative min-w-full flex-1 sm:min-w-[230px]">
             <Icon
               name="search"
               className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
@@ -5429,8 +5429,8 @@ function RoutingRulesPage({
         )}
 
       <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-white">
-        <div className="w-full">
-          <table className="w-full table-fixed">
+        <div className="w-full overflow-x-auto">
+          <table className="w-full min-w-[900px] table-fixed">
             <colgroup>
               <col className="w-[18%]" />
               <col className="w-[15%]" />
@@ -6738,7 +6738,7 @@ function AuditLogsPage({
           }
         </div>
 
-        <div className="w-full overflow-hidden">
+        <div className="w-full overflow-x-auto">
           <table className="w-full table-fixed">
             <colgroup>
               <col className="w-[8%]" />
@@ -7409,7 +7409,7 @@ function IntegrationsPage({
           (item) => (
             <article
               key={item.id}
-              className="rounded-2xl border border-slate-200 bg-white p-5"
+              className="rounded-2xl border border-slate-200 bg-white p-3 sm:p-5"
             >
               <div className="flex items-start justify-between gap-4">
                 <div
@@ -8081,7 +8081,7 @@ function SettingsPage({
           }) => (
             <article
               key={title}
-              className="rounded-2xl border border-slate-200 bg-white p-5"
+              className="rounded-2xl border border-slate-200 bg-white p-3 sm:p-5"
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
@@ -8115,7 +8115,7 @@ function SettingsPage({
         )}
       </div>
 
-      <article className="mt-4 rounded-2xl border border-slate-200 bg-white p-5">
+      <article className="mt-4 rounded-2xl border border-slate-200 bg-white p-3 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <h2 className="text-[14px] font-bold">
             Administrator identity
@@ -8195,6 +8195,15 @@ function AdminDashboard({
 
   const navigate =
     useNavigate()
+
+  const [
+    mobileNavOpen,
+    setMobileNavOpen,
+  ] = useState(false)
+
+  useEffect(() => {
+    setMobileNavOpen(false)
+  }, [location.pathname])
 
   const [
     dashboardData,
@@ -8550,9 +8559,20 @@ function AdminDashboard({
 
 
   return (
-    <div className="fixed inset-0 flex overflow-hidden bg-[#eef5fb] font-sans text-slate-800">
+    <div className="fixed inset-0 flex min-w-0 overflow-hidden bg-[#eef5fb] font-sans text-slate-800">
+      {mobileNavOpen && (
+        <button
+          type="button"
+          aria-label="Close navigation menu"
+          onClick={() => setMobileNavOpen(false)}
+          className="fixed inset-0 z-40 bg-slate-950/55 backdrop-blur-[2px] lg:hidden"
+        />
+      )}
+
       <aside
-        className="hidden h-full min-h-0 w-[244px] shrink-0 flex-col overflow-x-hidden overflow-y-auto bg-[#071a35] px-3.5 py-5 text-white [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:flex"
+        className={`fixed inset-y-0 left-0 z-50 flex h-full min-h-0 w-[84vw] max-w-[280px] shrink-0 flex-col overflow-x-hidden overflow-y-auto bg-[#071a35] px-3.5 py-5 text-white shadow-2xl transition-transform duration-300 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:static lg:z-auto lg:w-[244px] lg:translate-x-0 lg:shadow-none ${
+          mobileNavOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
         style={{
           msOverflowStyle:
             'none',
@@ -8752,18 +8772,31 @@ function AdminDashboard({
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="z-30 flex h-[72px] shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white px-5 lg:px-7">
-          <div>
-            <p className="text-[17px] font-bold text-slate-900">
+        <header className="z-30 flex min-h-[64px] shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 sm:px-5 lg:min-h-[72px] lg:px-7">
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              type="button"
+              aria-label="Open navigation menu"
+              aria-expanded={mobileNavOpen}
+              onClick={() => setMobileNavOpen(true)}
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 lg:hidden"
+            >
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+            <div className="min-w-0">
+            <p className="truncate text-sm font-bold text-slate-900 sm:text-[17px]">
               Admin Console
             </p>
 
             <p className="mt-0.5 hidden text-[8px] text-slate-500 sm:block">
               University-wide Operations & Configuration
             </p>
+            </div>
           </div>
 
-          <div className="flex min-w-0 items-center gap-3">
+          <div className="flex min-w-0 shrink-0 items-center gap-2 sm:gap-3">
             <div className="relative hidden w-[310px] xl:block">
               <Icon
                 name="search"
@@ -8809,7 +8842,7 @@ function AdminDashboard({
               onClick={
                 onLogout
               }
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[9px] font-semibold text-slate-600 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
+              className="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-[9px] font-semibold text-slate-600 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 sm:px-3"
             >
               Sign Out
             </button>
@@ -8822,7 +8855,7 @@ function AdminDashboard({
             className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-blue-100/50"
           />
 
-          <div className="relative z-10 mx-auto w-full max-w-[1500px] p-4 md:p-6">
+          <div className="relative z-10 mx-auto w-full max-w-[1500px] p-3 sm:p-4 md:p-6">
             <ErrorMessage
               message={
                 errorMessage

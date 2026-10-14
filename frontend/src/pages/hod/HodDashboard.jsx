@@ -883,7 +883,7 @@ function PageHeading({
           {eyebrow}
         </p>
 
-        <h1 className="mt-1 text-3xl font-bold tracking-[-0.035em] text-slate-900">
+        <h1 className="mt-1 text-2xl font-bold tracking-[-0.035em] text-slate-900 sm:text-3xl">
           {title}
         </h1>
 
@@ -3230,6 +3230,13 @@ function HodDashboard({
 
   const navigate =
     useNavigate()
+
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+
+  const navigateToHodPage = (path) => {
+    setMobileMenuOpen(false)
+    navigate(path)
+  }
 
 
   const [
@@ -6784,6 +6791,57 @@ function HodDashboard({
   return (
     <div className="fixed inset-0 flex overflow-hidden bg-[#eef5fb] font-sans text-slate-800">
 
+      {mobileMenuOpen && (
+        <button
+          type="button"
+          aria-label="Close navigation menu"
+          onClick={() => setMobileMenuOpen(false)}
+          className="fixed inset-0 z-40 bg-slate-950/55 backdrop-blur-[2px] lg:hidden"
+        />
+      )}
+
+      <aside
+        aria-label="Mobile HOD navigation"
+        className={`fixed inset-y-0 left-0 z-50 flex h-full w-[min(84vw,300px)] flex-col overflow-y-auto bg-[#071a35] px-3.5 py-5 text-white shadow-2xl transition-transform duration-300 lg:hidden ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <Brand />
+          <button
+            type="button"
+            aria-label="Close navigation menu"
+            onClick={() => setMobileMenuOpen(false)}
+            className="rounded-xl p-2 text-slate-300 hover:bg-white/10 hover:text-white"
+          >
+            <span className="text-xl leading-none">×</span>
+          </button>
+        </div>
+
+        <p className="mt-6 px-3 text-[8px] font-bold uppercase tracking-[0.18em] text-slate-500">HOD Portal</p>
+        <nav className="mt-3 space-y-1">
+          <NavButton icon="home" label="Overview" active={page === 'overview'} onClick={() => navigateToHodPage(PATHS.overview)} />
+          <NavButton icon="list" label="Department Queries" active={page === 'queries'} onClick={() => navigateToHodPage(PATHS.queries)} />
+          <NavButton icon="warning" label="Escalation Center" badge={escalationCount} active={page === 'center'} onClick={() => navigateToHodPage(PATHS.center)} />
+          <div className="mx-2 my-3 border-t border-white/10" />
+          <p className="px-3 py-1 text-[7px] font-bold uppercase tracking-[0.12em] text-slate-500">Control &amp; Oversight</p>
+          <NavButton icon="route" label="Routing Overrides" active={page === 'routing'} onClick={() => navigateToHodPage(PATHS.routing)} />
+          <NavButton icon="workload" label="Staff Workload" active={page === 'workload'} onClick={() => navigateToHodPage(PATHS.workload)} />
+          <NavButton icon="clock" label="SLA Analytics" active={page === 'sla'} onClick={() => navigateToHodPage(PATHS.sla)} />
+          <NavButton icon="mail" label="Daily Gmail Summary" active={page === 'summary'} onClick={() => navigateToHodPage(PATHS.summary)} />
+          <NavButton icon="bell" label="Notifications" active={page === 'notifications'} onClick={() => navigateToHodPage(PATHS.notifications)} />
+          <NavButton icon="shield" label="Audit History" active={page === 'audit'} onClick={() => navigateToHodPage(PATHS.audit)} />
+          <NavButton icon="user" label="Profile &amp; Security" active={page === 'profile'} onClick={() => navigateToHodPage(PATHS.profile)} />
+        </nav>
+
+        <div className="mt-auto pt-5">
+          <div className="rounded-2xl border border-blue-400/15 bg-white/[0.04] p-4 text-[10px]">
+            <p className="font-semibold text-emerald-300">● System Operational</p>
+            <p className="mt-2 text-slate-400">SLA monitor · Active</p>
+            <p className="mt-1 text-slate-400">Gmail · Ready</p>
+            <p className="mt-1 text-slate-400">Audit logging · Active</p>
+          </div>
+        </div>
+      </aside>
+
       <aside
         className="hidden h-full min-h-0 w-[244px] shrink-0 flex-col overflow-x-hidden overflow-y-auto bg-[#071a35] px-3.5 py-5 text-white [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:flex"
         style={{
@@ -7011,11 +7069,23 @@ function HodDashboard({
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
 
-        <header className="z-30 flex h-[72px] shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white px-5 lg:px-7">
+        <header className="z-30 flex min-h-[64px] shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-3 sm:h-[72px] sm:px-5 lg:px-7">
 
-          <div className="min-w-0">
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              type="button"
+              aria-label="Open navigation menu"
+              aria-expanded={mobileMenuOpen}
+              onClick={() => setMobileMenuOpen(true)}
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50 lg:hidden"
+            >
+              <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                <path d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
 
-            <p className="truncate text-[17px] font-bold text-slate-900">
+            <div className="min-w-0">
+            <p className="truncate text-[15px] font-bold text-slate-900 sm:text-[17px]">
               HOD Portal
             </p>
 
@@ -7026,11 +7096,12 @@ function HodDashboard({
                 || 'Department'
               }
             </p>
+            </div>
 
           </div>
 
 
-          <div className="flex min-w-0 items-center gap-3">
+          <div className="flex min-w-0 shrink-0 items-center gap-2 sm:gap-3">
 
             <form
               onSubmit={(event) => {
@@ -7114,7 +7185,7 @@ function HodDashboard({
               onClick={
                 onLogout
               }
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[9px] font-semibold text-slate-600 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
+              className="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-[9px] font-semibold text-slate-600 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 sm:px-3"
             >
               Sign Out
             </button>
@@ -7132,7 +7203,7 @@ function HodDashboard({
           />
 
 
-          <div className="relative z-10 mx-auto w-full max-w-[1500px] p-4 md:p-6">
+          <div className="relative z-10 mx-auto w-full max-w-[1500px] p-3 sm:p-4 md:p-6">
 
             {errorMessage && (
               <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-[10px] text-rose-700">
