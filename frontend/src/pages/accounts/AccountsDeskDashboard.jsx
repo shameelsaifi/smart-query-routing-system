@@ -3,7 +3,7 @@ import {
   Fragment,
 
   useState,
-
+  useEffect,
 } from 'react'
 
 
@@ -874,7 +874,7 @@ function StatCard({
 
   return (
 
-    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+    <div className="min-w-0 rounded-2xl border border-slate-200 bg-white p-3 sm:p-4">
 
 
 
@@ -894,7 +894,7 @@ function StatCard({
 
 
 
-          <p className="mt-2 text-2xl font-bold text-slate-900">
+          <p className="mt-2 break-words text-xl font-bold text-slate-900 sm:text-2xl">
 
             {value}
 
@@ -984,7 +984,7 @@ function Heading({
 
 
 
-        <h1 className="mt-1 text-3xl font-bold tracking-[-0.035em] text-slate-900">
+        <h1 className="mt-1 break-words text-2xl font-bold tracking-[-0.035em] text-slate-900 sm:text-3xl">
 
           {title}
 
@@ -992,7 +992,7 @@ function Heading({
 
 
 
-        <p className="mt-1 text-[11px] text-slate-500">
+        <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-500 sm:text-[11px]">
 
           {subtitle}
 
@@ -1296,7 +1296,7 @@ function TicketDetail({
 
 
 
-      <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-5 py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-3 py-3 sm:px-5 sm:py-4">
 
 
 
@@ -1352,7 +1352,7 @@ function TicketDetail({
 
 
 
-      <div className="grid gap-5 p-5 xl:grid-cols-[1.15fr_0.85fr]">
+      <div className="grid min-w-0 gap-4 p-3 sm:gap-5 sm:p-5 xl:grid-cols-[1.15fr_0.85fr]">
 
 
 
@@ -2155,7 +2155,9 @@ function AccountsDeskDashboard({
 
 }) {
 
-  const location =
+  
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+const location =
 
     useLocation()
 
@@ -2169,7 +2171,12 @@ function AccountsDeskDashboard({
 
 
 
-  const {
+  
+
+  useEffect(() => {
+    setMobileNavOpen(false)
+  }, [location.pathname])
+const {
 
     tickets,
 
@@ -2693,7 +2700,8 @@ function AccountsDeskDashboard({
 
   ) => {
 
-    setSelectedTicketNumber(
+    setMobileNavOpen(false)
+setSelectedTicketNumber(
 
       null,
 
@@ -3077,7 +3085,7 @@ function AccountsDeskDashboard({
   const tablePanel = (
     items,
   ) => (
-    <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+    <div className="mt-5 min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white">
       <QueryTable
         tickets={items}
         onOpen={openTicket}
@@ -3180,7 +3188,7 @@ function AccountsDeskDashboard({
 
 
 
-        <section className="mt-5 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+        <section className="mt-5 min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white">
 
 
 
@@ -3210,7 +3218,7 @@ function AccountsDeskDashboard({
 
 
 
-          <div className="grid gap-2 border-y border-slate-100 bg-slate-50/70 p-3 md:grid-cols-2 xl:grid-cols-[1.5fr_0.8fr_0.8fr_0.8fr_auto]">
+          <div className="grid min-w-0 grid-cols-1 gap-2 border-y border-slate-100 bg-slate-50/70 p-3 sm:grid-cols-2 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_auto]">
 
 
 
@@ -4454,9 +4462,19 @@ function AccountsDeskDashboard({
 
 
 
-      <aside
+      {mobileNavOpen && (
+        <button
+          type="button"
+          aria-label="Close navigation menu"
+          onClick={() => setMobileNavOpen(false)}
+          className="fixed inset-0 z-40 bg-slate-950/55 lg:hidden"
+        />
+      )}
 
-        className="hidden h-full min-h-0 w-[244px] shrink-0 flex-col overflow-x-hidden overflow-y-auto bg-[#071a35] px-3.5 py-5 text-white [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:flex"
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 flex h-full min-h-0 w-[min(84vw,280px)] shrink-0 flex-col overflow-x-hidden overflow-y-auto bg-[#071a35] px-3.5 py-5 text-white shadow-2xl transition-transform duration-300 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:static lg:z-auto lg:w-[244px] lg:translate-x-0 lg:shadow-none ${
+          mobileNavOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        }`}
 
         style={{
 
@@ -4872,13 +4890,30 @@ function AccountsDeskDashboard({
 
 
 
-        <header className="z-30 flex h-[72px] shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white px-5 lg:px-7">
+        <header className="z-30 flex min-h-[64px] shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-3 sm:h-[72px] sm:px-5 lg:px-7">
 
 
+
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+            <button
+              type="button"
+              aria-label={mobileNavOpen ? 'Close navigation menu' : 'Open navigation menu'}
+              aria-expanded={mobileNavOpen}
+              onClick={() => setMobileNavOpen((open) => !open)}
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 lg:hidden"
+            >
+              {mobileNavOpen ? (
+                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <path d="m6 6 12 12M18 6 6 18" />
+                </svg>
+              ) : (
+                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <path d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              )}
+            </button>
 
           <div className="min-w-0">
-
-
 
             <p className="truncate text-[17px] font-bold text-slate-900">
 
@@ -4902,7 +4937,9 @@ function AccountsDeskDashboard({
 
 
 
-          <div className="flex min-w-0 items-center gap-3">
+          </div>
+
+          <div className="flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-3">
 
 
 
@@ -5048,7 +5085,7 @@ function AccountsDeskDashboard({
 
               }
 
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[9px] font-semibold text-slate-600 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
+              className="rounded-lg border border-slate-200 bg-white px-2 py-2 text-[9px] font-semibold text-slate-600 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 sm:px-3"
 
             >
 
@@ -5084,7 +5121,7 @@ function AccountsDeskDashboard({
 
 
 
-          <div className="relative z-10 mx-auto w-full max-w-[1500px] p-4 md:p-6">
+          <div className="relative z-10 mx-auto w-full max-w-[1500px] p-3 sm:p-4 md:p-6">
 
 
 
