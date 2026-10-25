@@ -444,7 +444,7 @@ function NotificationSession({
   return (
     <div
       ref={containerRef}
-      className="relative"
+      className="relative z-40"
     >
       <button
         type="button"
@@ -454,10 +454,11 @@ function NotificationSession({
             : 'Notifications'
         }
         aria-expanded={open}
+        aria-controls="notification-panel"
         onClick={
           handleToggle
         }
-        className="relative flex h-9 w-9 items-center justify-center rounded-lg border border-slate-700 bg-slate-800 text-slate-200 transition hover:bg-slate-700 hover:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+        className="relative flex h-10 w-10 shrink-0 touch-manipulation items-center justify-center rounded-xl border border-slate-700 bg-slate-800 text-slate-200 transition-colors hover:bg-slate-700 hover:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900"
       >
         <svg
           className="h-5 w-5"
@@ -483,9 +484,9 @@ function NotificationSession({
 
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-[min(360px,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-800 shadow-2xl">
+        <div id="notification-panel" role="region" aria-label="Notifications panel" className="fixed inset-x-2 top-16 z-[100] mx-auto flex w-auto max-w-md flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-800 shadow-2xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-[min(24rem,calc(100vw-2rem))] sm:max-w-none">
 
-          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-slate-200 px-3 py-3 sm:px-4">
 
             <div>
               <h2 className="text-sm font-bold text-slate-900">
@@ -533,7 +534,7 @@ function NotificationSession({
           )}
 
 
-          <div className="max-h-[420px] overflow-y-auto">
+          <div className="min-h-0 max-h-[calc(100dvh-12rem)] overflow-y-auto overscroll-contain sm:max-h-[min(26rem,calc(100dvh-10rem))]">
 
             {loading && (
               <div className="px-4 py-8 text-center text-sm text-slate-500">
@@ -616,7 +617,7 @@ function NotificationSession({
 
                         <div className="flex items-start justify-between gap-2">
 
-                          <p className="text-sm font-semibold text-slate-900">
+                          <p className="min-w-0 break-words text-sm font-semibold text-slate-900">
                             {
                               notification
                                 .title
@@ -635,7 +636,7 @@ function NotificationSession({
                         </div>
 
 
-                        <p className="mt-1 text-xs leading-5 text-slate-600">
+                        <p className="mt-1 break-words text-xs leading-5 text-slate-600 [overflow-wrap:anywhere]">
                           {
                             notification
                               .message
@@ -645,7 +646,7 @@ function NotificationSession({
 
                         <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
 
-                          <div className="text-[10px] text-slate-400">
+                          <div className="min-w-0 break-words text-[10px] text-slate-400">
 
                             {
                               notification
@@ -715,7 +716,7 @@ function NotificationSession({
           </div>
 
 
-          <div className="border-t border-slate-200 bg-slate-50 px-4 py-2 text-center text-[10px] text-slate-500">
+          <div className="shrink-0 border-t border-slate-200 bg-slate-50 px-3 py-2 text-center text-[10px] leading-4 text-slate-500 sm:px-4">
             Automatically refreshes
             every 15 seconds
           </div>
